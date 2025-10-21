@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Navigation Assistant - Client Device</title>
+    <link rel="stylesheet" href="client-styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AI Navigation Assistant</h1>
+            <p class="subtitle">Client Device - Sensor Capture</p>
+        </header>
+
+        <!-- Media Preview Section -->
+        <div class="media-preview">
+            <div class="video-container">
+                <video id="localVideo" autoplay muted playsinline></video>
+                <div class="video-overlay" id="videoOverlay">
+                    <span>Camera not active</span>
+                </div>
+            </div>
+            <div class="audio-indicator">
+                <div class="audio-level" id="audioLevel"></div>
+                <span id="audioStatus">Microphone: Off</span>
+            </div>
+        </div>
+
+        <!-- Media Controls -->
+        <div class="media-controls">
+            <div class="permission-controls">
+                <button id="requestCameraBtn" class="control-btn camera-btn">
+                    <span class="btn-icon">📹</span>
+                    Enable Camera
+                </button>
+                <button id="requestMicBtn" class="control-btn mic-btn">
+                    <span class="btn-icon">🎤</span>
+                    Enable Microphone
+                </button>
+            </div>
+            <div class="stream-controls">
+                <button id="startStreamBtn" class="control-btn primary" disabled>
+                    Start Streaming
+                </button>
+                <button id="stopStreamBtn" class="control-btn secondary" disabled>
+                    Stop Streaming
+                </button>
+            </div>
+        </div>
+
+        <!-- Connection Management -->
+        <div class="connection-section">
+            <div class="server-config">
+                <label for="serverUrl">Backend Server URL:</label>
+                <input type="text" id="serverUrl" value="http://localhost:8000" placeholder="http://localhost:8000">
+                <p class="connection-note">Local streaming starts first, then connects to backend automatically</p>
+            </div>
+            <div class="connection-controls">
+                <button id="connectBtn" class="control-btn connect-btn" disabled>
+                    Manual Connect (Optional)
+                </button>
+                <button id="disconnectBtn" class="control-btn disconnect-btn" disabled>
+                    Disconnect
+                </button>
+            </div>
+        </div>
+
+        <!-- Status Indicators -->
+        <div class="status-section">
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="status-indicator" id="cameraIndicator"></div>
+                    <span>Camera</span>
+                    <span id="cameraStatus">Not Ready</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-indicator" id="micIndicator"></div>
+                    <span>Microphone</span>
+                    <span id="micStatus">Not Ready</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-indicator" id="connectionIndicator"></div>
+                    <span>WebRTC</span>
+                    <span id="connectionStatus">Disconnected</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-indicator" id="streamIndicator"></div>
+                    <span>Stream</span>
+                    <span id="streamStatus">Inactive</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Optional Biometric Section -->
+        <div class="biometric-section" id="biometricSection" style="display: none;">
+            <h3>Biometric Sensors (Optional)</h3>
+            <div class="biometric-controls">
+                <button id="enableBiometricBtn" class="control-btn biometric-btn">
+                    <span class="btn-icon">❤️</span>
+                    Enable Heart Rate
+                </button>
+                <div class="biometric-status">
+                    <span id="heartRateValue">-- BPM</span>
+                    <span id="biometricStatus">Not Available</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Debug Information -->
+        <div class="debug-section" id="debugSection">
+            <details>
+                <summary>Debug Information</summary>
+                <div class="debug-content">
+                    <div class="debug-item">
+                        <strong>Browser Support:</strong>
+                        <span id="browserSupport">Checking...</span>
+                    </div>
+                    <div class="debug-item">
+                        <strong>Connection State:</strong>
+                        <span id="connectionState">new</span>
+                    </div>
+                    <div class="debug-item">
+                        <strong>ICE State:</strong>
+                        <span id="iceState">new</span>
+                    </div>
+                    <div class="debug-item">
+                        <strong>Last Error:</strong>
+                        <span id="lastError">None</span>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </div>
+    <script src="client.js"></script>
+</body>
+</html>

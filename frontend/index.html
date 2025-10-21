@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Navigation Assistant</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="app-header">
+            <h1>AI Navigation Assistant</h1>
+            <div class="connection-status">
+                <span id="connectionIndicator" class="status-indicator disconnected">●</span>
+                <span id="connectionText">Disconnected</span>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="video-container">
+                <img id="videoStream" src="" alt="Navigation Video Stream" class="video-display">
+                <div class="video-overlay">
+                    <div id="loadingSpinner" class="loading-spinner hidden">
+                        <div class="spinner"></div>
+                        <p>Loading video stream...</p>
+                    </div>
+                    <div id="videoModeIndicator" class="video-mode-indicator hidden">
+                        <span id="videoModeText">Processed Stream</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="fsm-status-container">
+                <div class="fsm-status">
+                    <h3>Navigation State</h3>
+                    <div id="fsmState" class="state-display idle">IDLE</div>
+                    <div id="fsmDescription" class="state-description">System ready to start navigation</div>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button id="startStopBtn" class="control-btn start" aria-label="Start or stop navigation">
+                    <span class="btn-text">Start Navigation</span>
+                </button>
+            </div>
+
+            <div class="status-panel">
+                <div class="status-item">
+                    <span class="status-label">System Status:</span>
+                    <span id="systemStatus" class="status-value">Ready</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Audio:</span>
+                    <span id="audioStatus" class="status-value">Ready</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Video Stream:</span>
+                    <span id="videoStatus" class="status-value">Disconnected</span>
+                </div>
+            </div>
+        </main>
+
+        <footer class="app-footer">
+            <p class="accessibility-note">This interface is optimized for screen readers and voice navigation</p>
+        </footer>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

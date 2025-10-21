@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Stream-First Workflow</title>
+</head>
+<body>
+    <h1>Test Stream-First Workflow</h1>
+    <div id="log"></div>
+    <button onclick="simulateStreamFirst()">Simulate Stream-First Workflow</button>
+    
+    <script>
+        function addLog(message) {
+            const div = document.createElement('div');
+            div.textContent = new Date().toLocaleTimeString() + ': ' + message;
+            document.getElementById('log').appendChild(div);
+            console.log(message);
+        }
+        
+        function simulateStreamFirst() {
+            addLog('Testing stream-first workflow...');
+            
+            // Create a mock NavigationClient to test the new logic
+            const mockClient = {
+                cameraEnabled: true,
+                micEnabled: true,
+                isConnected: false,
+                videoStream: { 
+                    getVideoTracks: () => [{ kind: 'video', id: 'video1' }] 
+                },
+                audioStream: { 
+                    getAudioTracks: () => [{ kind: 'audio', id: 'audio1' }] 
+                },
+                localStream: null,
+                
+                updateStreamStatus: (status) => addLog('📺 Stream status: ' + status),
+                
+                async connectToServer() {
+                    addLog('🔗 Connecting to server...');
+                    
+                    try {
+                        const response = await fetch('http://localhost:8000/health');
+                        if (!response.ok) {
+                            throw new Error('Server not responding');
+                        }
+                        
+                        this.isConnected = true;
+                        addLog('✅ Successfully connected to backend');
+                        return true;
+                    } catch (error) {
+                        addLog('❌ Connection failed: ' + error.message);
+                        throw error;
+                    }
+                },
+                
+                async createPeerConnection() {
+                    addLog('🌐 Creating WebRTC peer connection...');
+                    return true;
+                },
+                
+                async createAndSendOffer() {
+                    addLog('📤 Creating and sending WebRTC offer...');
+                    
+                    try {
+                        const response = await fetch('http://localhost:8000/webrtc/offer', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                client_id: 'test_stream_first',
+                                type: 'offer',
+                                sdp: 'mock_sdp_data_stream_first'
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        addLog('✅ WebRTC offer successful: ' + JSON.stringify(result));
+                        return true;
+                    } catch (error) {
+                        addLog('❌ WebRTC offer failed: ' + error.message);
+                        throw error;
+                    }
+                }
+            };
+            
+            // Test the new stream-first logic
+            testStreamFirstWorkflow(mockClient);
+        }
+        
+        async function testStreamFirstWorkflow(client) {
+            try {
+                client.updateStreamStatus('Starting local stream...');
+                
+                // First, combine video and audio streams locally
+                addLog('🎥 Creating local media stream...');
+                const mockStream = {
+                    getTracks: () => [
+                        ...client.videoStream.getVideoTracks(),
+                        ...client.audioStream.getAudioTracks()
+                    ]
+                };
+                client.localStream = mockStream;
+                
+                addLog('✅ Local stream created with ' + mockStream.getTracks().length + ' tracks');
+                
+                // Update UI to show local streaming is active
+                client.updateStreamStatus('Local stream active');
+                addLog('📺 Local streaming is now active - user can see their camera feed');
+                
+                // Now automatically connect to backend if not already connected
+                if (!client.isConnected) {
+                    addLog('🔗 Local stream ready - connecting to backend...');
+                    client.updateStreamStatus('Connecting to backend...');
+                    
+                    try {
+                        await client.connectToServer();
+                        addLog('✅ Successfully connected to backend');
+                    } catch (error) {
+                        addLog('⚠️ Backend connection failed - continuing with local streaming only');
+                        client.updateStreamStatus('Local only (backend unavailable)');
+                        return; // Continue with local streaming even if backend connection fails
+                    }
+                }
+                
+                // Backend connection successful - set up WebRTC
+                addLog('🌐 Setting up WebRTC connection...');
+                client.updateStreamStatus('Setting up WebRTC...');
+                
+                await client.createPeerConnection();
+                await client.createAndSendOffer();
+                
+                // WebRTC connection successful
+                client.updateStreamStatus('Streaming to backend');
+                addLog('✅ Full streaming pipeline active: Local → WebRTC → Backend');
+                addLog('🎉 Stream-first workflow completed successfully!');
+                
+            } catch (error) {
+                addLog('❌ Failed to start streaming: ' + error.message);
+                client.updateStreamStatus('Error');
+            }
+        }
+    </script>
+</body>
+</html>

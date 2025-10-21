@@ -1,0 +1,427 @@
+/* AI Navigation Assistant Frontend Styles */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background-color: #1a1a1a;
+    color: #ffffff;
+    min-height: 100vh;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 20px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header Styles */
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid #333;
+}
+
+h1 {
+    color: #4CAF50;
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+}
+
+.status-indicator {
+    font-size: 1.2rem;
+    transition: color 0.3s ease;
+}
+
+.status-indicator.connected {
+    color: #4CAF50;
+}
+
+.status-indicator.disconnected {
+    color: #f44336;
+}
+
+.status-indicator.connecting {
+    color: #ff9800;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Main Content */
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+}
+
+/* Video Container */
+.video-container {
+    position: relative;
+    border: 3px solid #333;
+    border-radius: 15px;
+    overflow: hidden;
+    background-color: #000;
+    aspect-ratio: 16/9;
+    max-height: 450px;
+}
+
+.video-display {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.video-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(0, 0, 0, 0.7);
+    transition: opacity 0.3s ease;
+}
+
+.loading-spinner {
+    text-align: center;
+    color: #4CAF50;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #333;
+    border-top: 4px solid #4CAF50;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 10px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.hidden {
+    display: none;
+}
+
+.video-mode-indicator {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: #4CAF50;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+/* FSM Status Display */
+.fsm-status-container {
+    background-color: #2a2a2a;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+}
+
+.fsm-status h3 {
+    color: #4CAF50;
+    margin-bottom: 15px;
+    font-size: 1.2rem;
+}
+
+.state-display {
+    font-size: 1.8rem;
+    font-weight: bold;
+    padding: 12px 24px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    transition: all 0.3s ease;
+}
+
+.state-display.idle {
+    background-color: #555;
+    color: #ccc;
+}
+
+.state-display.scanning {
+    background-color: #ff9800;
+    color: #000;
+}
+
+.state-display.guiding {
+    background-color: #4CAF50;
+    color: #000;
+}
+
+.state-display.blocked {
+    background-color: #f44336;
+    color: #fff;
+    animation: urgent-pulse 1s infinite;
+}
+
+@keyframes urgent-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.state-description {
+    font-size: 1rem;
+    color: #ccc;
+    font-style: italic;
+}
+
+/* Controls */
+.controls {
+    text-align: center;
+}
+
+.control-btn {
+    padding: 20px 40px;
+    font-size: 1.3rem;
+    font-weight: bold;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    min-width: 200px;
+    position: relative;
+    overflow: hidden;
+}
+
+.control-btn.start {
+    background-color: #4CAF50;
+    color: white;
+    box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+}
+
+.control-btn.start:hover {
+    background-color: #45a049;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+}
+
+.control-btn.stop {
+    background-color: #f44336;
+    color: white;
+    box-shadow: 0 4px 15px rgba(244, 67, 54, 0.3);
+}
+
+.control-btn.stop:hover {
+    background-color: #da190b;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(244, 67, 54, 0.4);
+}
+
+.control-btn:active {
+    transform: translateY(0);
+}
+
+.control-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+/* Status Panel */
+.status-panel {
+    background-color: #2a2a2a;
+    border-radius: 12px;
+    padding: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+}
+
+.status-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background-color: #333;
+    border-radius: 8px;
+}
+
+.status-label {
+    font-weight: 600;
+    color: #ccc;
+}
+
+.status-value {
+    font-weight: bold;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.status-value.ready {
+    background-color: #4CAF50;
+    color: #000;
+}
+
+.status-value.error {
+    background-color: #f44336;
+    color: #fff;
+}
+
+.status-value.warning {
+    background-color: #ff9800;
+    color: #000;
+}
+
+.status-value.inactive {
+    background-color: #555;
+    color: #ccc;
+}
+
+/* Footer */
+.app-footer {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #333;
+    text-align: center;
+}
+
+.accessibility-note {
+    font-size: 0.9rem;
+    color: #888;
+    font-style: italic;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+    .container {
+        padding: 15px;
+    }
+    
+    .app-header {
+        flex-direction: column;
+        gap: 15px;
+        text-align: center;
+    }
+    
+    h1 {
+        font-size: 1.6rem;
+    }
+    
+    .video-container {
+        aspect-ratio: 4/3;
+    }
+    
+    .control-btn {
+        padding: 18px 35px;
+        font-size: 1.1rem;
+        min-width: 180px;
+    }
+    
+    .state-display {
+        font-size: 1.5rem;
+        padding: 10px 20px;
+    }
+    
+    .status-panel {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .container {
+        padding: 10px;
+    }
+    
+    h1 {
+        font-size: 1.4rem;
+    }
+    
+    .control-btn {
+        padding: 16px 30px;
+        font-size: 1rem;
+        min-width: 160px;
+    }
+    
+    .fsm-status-container,
+    .status-panel {
+        padding: 15px;
+    }
+    
+    .state-display {
+        font-size: 1.3rem;
+        padding: 8px 16px;
+    }
+}
+
+/* High contrast mode for accessibility */
+@media (prefers-contrast: high) {
+    .container {
+        border: 2px solid #fff;
+    }
+    
+    .video-container {
+        border-color: #fff;
+    }
+    
+    .control-btn {
+        border: 2px solid #fff;
+    }
+}
+
+/* Visual Alert Animations */
+@keyframes slideDown {
+    from {
+        transform: translateX(-50%) translateY(-100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(-50%) translateY(-100%);
+        opacity: 0;
+    }
+}
+
+/* Reduced motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
