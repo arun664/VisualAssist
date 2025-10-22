@@ -87,7 +87,8 @@ def start_minimal_server():
             return False
         
         host = os.getenv('SERVER_HOST', '0.0.0.0')
-        port = int(os.getenv('SERVER_PORT', 8000))
+        # Railway uses PORT environment variable, fallback to SERVER_PORT then default
+        port = int(os.getenv('PORT', os.getenv('SERVER_PORT', 8000)))
         
         logger.info(f"Starting minimal server on {host}:{port}")
         
@@ -130,7 +131,8 @@ def start_full_application():
         import uvicorn
         
         host = os.getenv('SERVER_HOST', '0.0.0.0')
-        port = int(os.getenv('SERVER_PORT', 8000))
+        # Railway uses PORT environment variable, fallback to SERVER_PORT then default
+        port = int(os.getenv('PORT', os.getenv('SERVER_PORT', 8000)))
         environment = os.getenv('ENVIRONMENT', 'production')
         
         logger.info(f"Starting full application on {host}:{port} in {environment} mode")
