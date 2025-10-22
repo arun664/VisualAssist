@@ -11,6 +11,56 @@
 // - Shows system status and monitoring
 // - Communicates via WebSocket for commands
 
+// Authentication System
+class AuthManager {
+    constructor() {
+        this.isAuthenticated = false;
+        this.accessCode = null;
+        this.encryptedCode = this.hashCode("GreenMean"); // Encrypted access code
+    }
+
+    // Simple hash function for code encryption
+    hashCode(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        return Math.abs(hash).toString(36);
+    }
+
+    validateCode(inputCode) {
+        const hashedInput = this.hashCode(inputCode);
+        return hashedInput === this.encryptedCode;
+    }
+
+    authenticate(code) {
+        if (this.validateCode(code)) {
+            this.isAuthenticated = true;
+            this.accessCode = code;
+            localStorage.setItem('nav_auth', this.encryptedCode);
+            return true;
+        }
+        return false;
+    }
+
+    checkStoredAuth() {
+        const stored = localStorage.getItem('nav_auth');
+        if (stored === this.encryptedCode) {
+            this.isAuthenticated = true;
+            return true;
+        }
+        return false;
+    }
+
+    logout() {
+        this.isAuthenticated = false;
+        this.accessCode = null;
+        localStorage.removeItem('nav_auth');
+    }
+}
+
 class WebSocketManager {
     constructor(url, onMessage, onStateChange, onConnectionChange) {
         this.url = url;
@@ -808,6 +858,7 @@ class VideoDisplayController {
 
 class NavigationApp {
     constructor() {
+        this.authManager = new AuthManager();
         this.websocketManager = null;
         this.audioSystem = null;
         this.videoController = null;
@@ -817,6 +868,63 @@ class NavigationApp {
     }
 
     init() {
+        // Check if user is already authenticated
+        if (this.authManager.checkStoredAuth()) {
+            this.hideAuthModal();
+            this.initializeApp();
+        } else {
+            this.showAuthModal();
+        }
+        this.setupAuthEventListeners();
+    }
+
+    showAuthModal() {
+        const modal = document.getElementById('authModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            document.getElementById('authCodeInput').focus();
+        }
+    }
+
+    hideAuthModal() {
+        const modal = document.getElementById('authModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    setupAuthEventListeners() {
+        const authSubmitBtn = document.getElementById('authSubmitBtn');
+        const authCodeInput = document.getElementById('authCodeInput');
+        const authError = document.getElementById('authError');
+
+        const handleAuth = () => {
+            const code = authCodeInput.value.trim();
+            if (this.authManager.authenticate(code)) {
+                authError.classList.add('hidden');
+                this.hideAuthModal();
+                this.initializeApp();
+            } else {
+                authError.classList.remove('hidden');
+                authCodeInput.value = '';
+                authCodeInput.focus();
+                // Add shake animation
+                authCodeInput.style.animation = 'shake 0.5s ease-in-out';
+                setTimeout(() => {
+                    authCodeInput.style.animation = '';
+                }, 500);
+            }
+        };
+
+        authSubmitBtn.addEventListener('click', handleAuth);
+        authCodeInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleAuth();
+            }
+        });
+    }
+
+    initializeApp() {
         this.setupEventListeners();
         this.initializeAudioSystem();
         this.initializeVideoController();

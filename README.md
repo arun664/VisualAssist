@@ -6,14 +6,14 @@ Real-time AI-powered navigation assistance with object detection, path guidance,
 
 ## 🚀 Production Setup (Recommended)
 
-### 1. Backend Deployed on Railway
-Backend is automatically deployed to: `https://your-app-name.up.railway.app`
+### 1. Backend Deployed on AWS
+Backend is running on AWS: `http://18.222.141.234:8000`
 
 ### 2. Use Live Frontend & Client
 - **Frontend**: https://arun664.github.io/VisualAssist/
 - **Client**: https://arun664.github.io/VisualAssist/client/
 
-**✨ Zero setup needed!** Both frontend/client (GitHub Pages) and backend (Railway) are fully hosted in the cloud.
+**✨ Zero setup needed!** Both frontend/client (GitHub Pages) and backend (AWS) are fully hosted in the cloud.
 
 ## 🛠️ Local Development Setup
 
@@ -100,7 +100,7 @@ vision_processor = VisionProcessor(
 ## 🌐 Production Architecture
 
 ```
-GitHub Pages (HTTPS)          Railway.app (HTTPS)
+GitHub Pages (HTTPS)          AWS Instance (HTTP)
 ┌─────────────────┐         ┌──────────────────┐
 │  Frontend       │◄────────┤  Backend         │
 │  Client         │  CORS   │  + Pretrained AI │
@@ -109,20 +109,17 @@ GitHub Pages (HTTPS)          Railway.app (HTTPS)
 
 ### Benefits:
 - ✅ **Free frontend hosting** (GitHub Pages)
-- ✅ **Cloud backend hosting** (Railway)
-- ✅ **Scalable AI processing** (Railway containers)
+- ✅ **Cloud backend hosting** (AWS)
+- ✅ **Scalable AI processing** (AWS infrastructure)
 - ✅ **No model files to manage** (auto-download)
-- ✅ **Automatic deployments** (GitHub Actions + Railway)
+- ✅ **Simple deployment** (GitHub Pages + AWS)
 - ✅ **Zero local setup** (fully cloud-hosted)
 
 ## 🧪 Test Backend
 
 ```bash
-# Check Railway backend health
-curl https://your-app-name.up.railway.app/health
-
-# For local development
-curl http://localhost:8000/health
+# Check AWS backend health
+curl http://18.222.141.234:8000/health
 ```
 
 ## 🔍 How It Works
@@ -168,9 +165,9 @@ pip install ultralytics
 ```
 
 ### CORS Issues
-**Production (Railway)**: CORS is automatically configured for HTTPS connections.
+**Production (AWS)**: CORS is configured for HTTP connections from GitHub Pages.
 
-**Local Development**: 
+**If CORS issues occur**: 
 1. **Use Chrome with CORS disabled**:
    ```
    chrome.exe --disable-web-security --user-data-dir="C:\temp\chrome-cors"
@@ -192,7 +189,7 @@ pip install ultralytics
 1. Open: https://arun664.github.io/VisualAssist/client/
 2. Click "Enable Camera" → Allow permissions
 3. Click "Enable Microphone" → Allow permissions  
-4. Click "Start Streaming" → Connects to Railway backend
+4. Click "Start Streaming" → Connects to AWS backend
 
 ### Frontend Monitor:
 1. Open: https://arun664.github.io/VisualAssist/
@@ -223,16 +220,10 @@ pip install ultralytics
 4. Select **Read and write permissions**
 5. Push to `main` branch to trigger deployment
 
-### Railway Backend Deployment
-1. Connect your GitHub repository to Railway
-2. Railway automatically detects the `railway.json` configuration
-3. Backend deploys automatically on every push to `main`
-4. Update `config.js` with your Railway app URL
-
-### Live URLs (After Deployment)
+### Live URLs
 - **Frontend**: `https://arun664.github.io/VisualAssist/`
 - **Client**: `https://arun664.github.io/VisualAssist/client/`
-- **Backend**: `https://your-app-name.up.railway.app` (Railway)
+- **Backend**: `http://18.222.141.234:8000` (AWS)
 
 ### Local Development
 ```bash
@@ -262,7 +253,6 @@ ai-navigation-assistant/
 │   └── client-styles.css # Client styling
 ├── .github/workflows/     # GitHub Actions
 ├── docker-compose.yml     # Local development
-├── railway.json          # Railway deployment
 ├── config.js             # Configuration
 └── README.md            # This file
 ```
@@ -273,4 +263,4 @@ MIT License - Free for personal and commercial use.
 
 ---
 
-**Powered by:** Ultralytics YOLOv11, FastAPI, WebRTC, Railway, and GitHub Pages.
+**Powered by:** Ultralytics YOLOv11, FastAPI, WebRTC, AWS, and GitHub Pages.

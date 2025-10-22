@@ -417,3 +417,130 @@ h1 {
         margin: 5px;
     }
 }
+
+/* Authentication Modal Styles */
+.auth-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    backdrop-filter: blur(5px);
+}
+
+.auth-content {
+    background: linear-gradient(135deg, #2a2a2a 0%, #1e1e1e 100%);
+    padding: 40px;
+    border-radius: 15px;
+    border: 2px solid #007acc;
+    box-shadow: 0 10px 30px rgba(0, 122, 204, 0.3);
+    text-align: center;
+    max-width: 400px;
+    width: 90%;
+    animation: modalSlideIn 0.3s ease-out;
+}
+
+.auth-content h2 {
+    color: #007acc;
+    margin-bottom: 15px;
+    font-size: 1.5rem;
+}
+
+.auth-content p {
+    color: #cccccc;
+    margin-bottom: 25px;
+    font-size: 0.95rem;
+}
+
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+#authCodeInput {
+    padding: 12px;
+    border: 2px solid #333;
+    border-radius: 8px;
+    background-color: #1a1a1a;
+    color: #ffffff;
+    font-size: 16px;
+    transition: border-color 0.3s ease;
+    text-align: center;
+    font-family: monospace;
+    letter-spacing: 2px;
+}
+
+#authCodeInput:focus {
+    outline: none;
+    border-color: #007acc;
+    box-shadow: 0 0 10px rgba(0, 122, 204, 0.3);
+}
+
+#authCodeInput::placeholder {
+    color: #666;
+    letter-spacing: normal;
+}
+
+.auth-btn {
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #007acc 0%, #005a9e 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.auth-btn:hover {
+    background: linear-gradient(135deg, #005a9e 0%, #004578 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 122, 204, 0.4);
+}
+
+.auth-btn:active {
+    transform: translateY(0);
+}
+
+.auth-error {
+    color: #ff4444;
+    background-color: rgba(255, 68, 68, 0.1);
+    padding: 10px;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 68, 68, 0.3);
+    margin-bottom: 15px;
+    font-size: 0.9rem;
+}
+
+.auth-note {
+    color: #888;
+    font-size: 0.8rem;
+    margin-top: 15px;
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+    20%, 40%, 60%, 80% { transform: translateX(5px); }
+}

@@ -6,14 +6,14 @@
 - **Frontend**: https://arun664.github.io/VisualAssist/
 - **Client**: https://arun664.github.io/VisualAssist/client/
 
-That's it! Both frontend/client (GitHub Pages) and backend (Railway) are fully hosted in the cloud.
+That's it! Both frontend/client (GitHub Pages) and backend (AWS) are fully hosted in the cloud.
 
 ## What You Get
 
 - ✅ **Free frontend hosting** (GitHub Pages)
-- ✅ **Cloud AI backend** (Railway)
-- ✅ **Scalable processing** (Railway containers)
-- ✅ **Auto-updating everything** (GitHub Actions + Railway)
+- ✅ **Cloud AI backend** (AWS)
+- ✅ **Scalable processing** (AWS infrastructure)
+- ✅ **Simple deployment** (GitHub Pages + AWS)
 - ✅ **Zero setup complexity** (just open URLs!)
 
 ## Local Development Commands
@@ -29,8 +29,8 @@ docker-compose logs backend
 # Stop backend
 docker-compose down
 
-# Test Railway backend
-curl https://your-app-name.up.railway.app/health
+# Test AWS backend
+curl http://18.222.141.234:8000/health
 ```
 
 ## Troubleshooting
@@ -54,7 +54,7 @@ docker-compose up -d backend
 
 ### Frontend Not Loading
 - Check GitHub Pages deployment in repository Actions tab
-- Ensure backend is running on localhost:8000
+- Ensure backend is running on 18.222.141.234:8000
 - Try refreshing the page
 
 ---

@@ -13,6 +13,22 @@
             <p class="subtitle">Client Device - Sensor Capture</p>
         </header>
 
+        <!-- Authentication Modal -->
+        <div id="authModal" class="auth-modal">
+            <div class="auth-content">
+                <h2>🔐 Backend Authentication</h2>
+                <p>Enter the access code to connect to the backend service:</p>
+                <div class="auth-form">
+                    <input type="password" id="authCodeInput" placeholder="Enter access code" maxlength="50">
+                    <button id="authSubmitBtn" class="auth-btn">Connect</button>
+                </div>
+                <div id="authError" class="auth-error hidden">Invalid access code. Please try again.</div>
+                <div class="auth-note">
+                    <small>🛡️ Secure connection required for AI navigation services</small>
+                </div>
+            </div>
+        </div>
+
         <!-- Media Preview Section -->
         <div class="media-preview">
             <div class="video-container">
