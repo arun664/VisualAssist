@@ -306,6 +306,10 @@ class AudioFeedbackSystem {
         this.urgencyQueue = [];
         this.isSpeaking = false;
         
+        // Rate limiting: only allow audio once every 5 seconds
+        this.lastAudioTime = 0;
+        this.audioRateLimit = 5000; // 5 seconds in milliseconds
+        
         if (!this.isSupported) {
             console.warn('Speech Synthesis API not supported in this browser');
         }
@@ -328,6 +332,22 @@ class AudioFeedbackSystem {
             console.warn('Cannot speak: API not supported or no text provided');
             this.handleTTSFailure(text, urgency);
             return false;
+        }
+
+        // Rate limiting: check if enough time has passed since last audio
+        const currentTime = Date.now();
+        const timeSinceLastAudio = currentTime - this.lastAudioTime;
+        
+        if (timeSinceLastAudio < this.audioRateLimit) {
+            const remainingTime = this.audioRateLimit - timeSinceLastAudio;
+            console.log(`🔇 Audio rate limited: ${text} (${remainingTime}ms remaining)`);
+            
+            // For emergency messages, override rate limiting
+            if (urgency !== 'emergency') {
+                return false;
+            } else {
+                console.log('🚨 Emergency message overrides rate limiting');
+            }
         }
 
         try {
@@ -386,6 +406,9 @@ class AudioFeedbackSystem {
             utterance.onstart = () => {
                 clearTimeout(ttsTimeout);
                 this.isSpeaking = true;
+                // Update timestamp when audio actually starts playing
+                this.lastAudioTime = Date.now();
+                console.log('🔊 Audio started, rate limit timer reset');
             };
 
             utterance.onend = () => {
@@ -609,6 +632,36 @@ class AudioFeedbackSystem {
         }
 
         const nextItem = this.urgencyQueue.shift();
+        
+        // Check rate limiting for queued items (except emergency)
+        const currentTime = Date.now();
+        const timeSinceLastAudio = currentTime - this.lastAudioTime;
+        
+        if (timeSinceLastAudio < this.audioRateLimit && nextItem.urgency !== 'emergency') {
+            console.log(`🔇 Queued audio rate limited: ${nextItem.originalText}`);
+            // Skip this item and try next one
+            this.processQueue();
+            return;
+        }
+
+        // Set up event handlers for this queued item
+        nextItem.utterance.onstart = () => {
+            this.isSpeaking = true;
+            this.lastAudioTime = Date.now();
+            console.log('🔊 Queued audio started, rate limit timer reset');
+        };
+
+        nextItem.utterance.onend = () => {
+            this.isSpeaking = false;
+            this.processQueue();
+        };
+
+        nextItem.utterance.onerror = (event) => {
+            console.error('Speech synthesis error:', event.error);
+            this.isSpeaking = false;
+            this.processQueue();
+        };
+
         this.speechSynthesis.speak(nextItem.utterance);
     }
 
@@ -638,6 +691,19 @@ class AudioFeedbackSystem {
         }
 
         return voice;
+    }
+
+    getRateLimitStatus() {
+        const currentTime = Date.now();
+        const timeSinceLastAudio = currentTime - this.lastAudioTime;
+        const remainingTime = Math.max(0, this.audioRateLimit - timeSinceLastAudio);
+        
+        return {
+            canPlayAudio: timeSinceLastAudio >= this.audioRateLimit,
+            timeSinceLastAudio: timeSinceLastAudio,
+            remainingTime: remainingTime,
+            rateLimitMs: this.audioRateLimit
+        };
     }
 
     setLanguage(languageCode) {
@@ -680,25 +746,37 @@ class VideoDisplayController {
         this.maxReconnectAttempts = 3;
         this.reconnectDelay = 2000;
         this.shouldReconnect = true;
+        this.useMjpegMode = true; // Use MJPEG mode by default
         
         this.init();
     }
 
     init() {
         this.setupEventListeners();
+        
+        // Debug configuration
+        console.log('Video controller initialized with:', {
+            streamUrl: this.streamUrl,
+            backendUrl: window.AI_NAV_CONFIG.getBackendUrl(),
+            isDevelopment: window.AI_NAV_CONFIG.isDevelopment(),
+            protocol: window.location.protocol,
+            hostname: window.location.hostname
+        });
     }
 
     setupEventListeners() {
-        this.videoElement.onload = () => {
-            console.log('Video stream connected');
-            this.isConnected = true;
-            this.reconnectAttempts = 0;
-            this.hideLoadingSpinner();
-            this.onStatusChange('connected', 'Video stream active');
-        };
-
+        // Note: onload handler is set in connectToStream() to handle timeout
+        
         this.videoElement.onerror = (error) => {
             console.error('Video stream error:', error);
+            console.error('Failed URL:', this.videoElement.src);
+            console.error('Video element state:', {
+                src: this.videoElement.src,
+                readyState: this.videoElement.readyState,
+                networkState: this.videoElement.networkState,
+                videoWidth: this.videoElement.videoWidth,
+                videoHeight: this.videoElement.videoHeight
+            });
             this.handleStreamError();
         };
 
@@ -714,6 +792,14 @@ class VideoDisplayController {
             return;
         }
 
+        // Check if backend URL is configured
+        const backendUrl = window.AI_NAV_CONFIG.getBackendUrl();
+        if (!backendUrl || backendUrl === '') {
+            console.error('Backend URL not configured - cannot connect to video stream');
+            this.onStatusChange('error', 'Backend URL not configured');
+            return;
+        }
+
         console.log('Connecting to video stream:', this.streamUrl);
         this.showLoadingSpinner();
         this.onStatusChange('connecting', 'Connecting to video stream...');
@@ -721,9 +807,76 @@ class VideoDisplayController {
         // Switch to processed stream view
         this.switchToProcessedStream();
         
-        // Add timestamp to prevent caching issues
-        const timestampedUrl = `${this.streamUrl}?t=${Date.now()}`;
+        // Clear any existing source first
+        this.videoElement.src = '';
+        
+        // Add timestamp to prevent caching issues and force reload
+        const timestampedUrl = `${this.streamUrl}?t=${Date.now()}&cache=false`;
+        
+        // Create a new approach for MJPEG streams with video elements
+        if (this.useMjpegMode) {
+            console.log('Using MJPEG mode for video stream');
+            
+            // Create a fallback - if video element doesn't support MJPEG, create an img element
+            const fallbackImg = document.createElement('img');
+            fallbackImg.style.width = '100%';
+            fallbackImg.style.height = 'auto';
+            fallbackImg.style.display = 'none';
+            fallbackImg.id = 'mjpegFallbackImg';
+            
+            // Insert after video element
+            this.videoElement.parentNode.insertBefore(fallbackImg, this.videoElement.nextSibling);
+            
+            // Set up a timeout to detect if the stream doesn't load in video element
+            const loadTimeout = setTimeout(() => {
+                if (!this.isConnected) {
+                    console.warn('Video element not loading MJPEG stream - trying img fallback...');
+                    
+                    // Hide video element and show img element instead
+                    this.videoElement.style.display = 'none';
+                    fallbackImg.style.display = 'block';
+                    
+                    // Set up img element handlers
+                    fallbackImg.onload = () => {
+                        console.log('MJPEG stream loaded in img fallback');
+                        this.isConnected = true;
+                        this.reconnectAttempts = 0;
+                        this.hideLoadingSpinner();
+                        this.onStatusChange('connected', 'Video stream active (fallback mode)');
+                    };
+                    
+                    fallbackImg.onerror = (error) => {
+                        console.error('Fallback img stream error:', error);
+                        this.handleStreamError();
+                    };
+                    
+                    // Set the source for the fallback img
+                    fallbackImg.src = timestampedUrl;
+                }
+            }, 3000);
+            
+            // For video elements with MJPEG streams
+            this.videoElement.onloadeddata = () => {
+                clearTimeout(loadTimeout);
+                console.log('MJPEG stream loaded in video element');
+                this.isConnected = true;
+                this.reconnectAttempts = 0;
+                this.hideLoadingSpinner();
+                this.onStatusChange('connected', 'Video stream active');
+            };
+        }
+        
+        // Set the source - this will start the stream
         this.videoElement.src = timestampedUrl;
+        
+        console.log('Video element src set to:', timestampedUrl);
+        console.log('Video element properties:', {
+            src: this.videoElement.src,
+            readyState: this.videoElement.readyState,
+            networkState: this.videoElement.networkState,
+            videoWidth: this.videoElement.videoWidth,
+            videoHeight: this.videoElement.videoHeight
+        });
     }
 
     switchToProcessedStream() {
@@ -732,6 +885,20 @@ class VideoDisplayController {
         
         // Show processed stream
         this.videoElement.classList.remove('hidden');
+        
+        // Debug: Check if element is visible
+        console.log('Video element visibility after removing hidden:', {
+            hasHiddenClass: this.videoElement.classList.contains('hidden'),
+            computedDisplay: window.getComputedStyle(this.videoElement).display,
+            offsetWidth: this.videoElement.offsetWidth,
+            offsetHeight: this.videoElement.offsetHeight,
+            src: this.videoElement.src
+        });
+        
+        // For video elements, try to play
+        if (this.videoElement.play) {
+            this.videoElement.play().catch(e => console.log('Video play failed:', e));
+        }
         
         // Update mode indicator
         videoModeIndicator.classList.remove('hidden');
@@ -749,18 +916,43 @@ class VideoDisplayController {
         const videoModeIndicator = document.getElementById('videoModeIndicator');
         videoModeIndicator.classList.add('hidden');
         
+        // Also handle fallback image if it exists
+        const fallbackImg = document.getElementById('mjpegFallbackImg');
+        if (fallbackImg) {
+            fallbackImg.src = '';
+            fallbackImg.style.display = 'none';
+        }
+        
         this.onStatusChange('disconnected', 'Video stream disconnected');
     }
 
     handleStreamError() {
         this.isConnected = false;
         this.hideLoadingSpinner();
+        
+        // Check if this is a configuration issue
+        const backendUrl = window.AI_NAV_CONFIG.getBackendUrl();
+        if (!backendUrl || backendUrl === '') {
+            this.onStatusChange('error', 'Backend URL not configured');
+            console.error('Cannot connect to video stream: Backend URL is not configured');
+            return;
+        }
+        
+        console.error('Video stream error details:', {
+            streamUrl: this.streamUrl,
+            backendUrl: backendUrl,
+            videoSrc: this.videoElement.src,
+            reconnectAttempts: this.reconnectAttempts,
+            maxRetries: this.maxReconnectAttempts
+        });
+        
         this.onStatusChange('error', 'Video stream error');
         
         if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
             this.scheduleReconnect();
         } else {
-            this.onStatusChange('error', 'Video stream failed - max retries reached');
+            this.onStatusChange('error', 'Video stream failed - check backend server');
+            console.error('Video stream failed after max retries. Backend may be offline or unreachable.');
         }
     }
 
@@ -803,6 +995,45 @@ class VideoDisplayController {
         this.reconnectAttempts = 0;
         this.shouldReconnect = true;
     }
+
+    async testStreamConnectivity() {
+        const backendUrl = window.AI_NAV_CONFIG.getBackendUrl();
+        if (!backendUrl || backendUrl === '') {
+            return { success: false, error: 'Backend URL not configured' };
+        }
+
+        try {
+            console.log('Testing video stream connectivity...');
+            
+            // Create an AbortController for timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            
+            const response = await fetch(this.streamUrl, { 
+                method: 'GET',
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+                // Check if it's actually an MJPEG stream
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('multipart/x-mixed-replace')) {
+                    return { success: true, status: response.status, contentType: contentType };
+                } else {
+                    return { success: true, status: response.status, contentType: contentType, warning: 'Not MJPEG stream' };
+                }
+            } else {
+                return { success: false, error: `HTTP ${response.status}`, status: response.status };
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                return { success: false, error: 'Request timeout' };
+            }
+            return { success: false, error: error.message };
+        }
+    }
 }
 
 // WebRTC functionality removed from frontend - this is handled by the client device
@@ -819,11 +1050,97 @@ class NavigationApp {
     }
 
     init() {
+        console.log('🚀 Initializing AI Navigation Assistant Frontend');
+        console.log('Backend URL:', window.AI_NAV_CONFIG.getBackendUrl());
+        console.log('WebSocket URL:', window.AI_NAV_CONFIG.getWebSocketUrl());
+        console.log('Video Stream URL:', window.AI_NAV_CONFIG.getVideoStreamUrl());
+        
         this.setupEventListeners();
         this.initializeAudioSystem();
         this.initializeVideoController();
         this.initializeWebSocket();
         this.updateUI();
+        
+        console.log('✅ Frontend initialization complete');
+    }
+
+    async testVideoStream() {
+        console.log('🧪 Testing video stream connectivity...');
+        
+        const testBtn = document.getElementById('testVideoBtn');
+        const originalText = testBtn.textContent;
+        testBtn.textContent = 'Testing...';
+        testBtn.disabled = true;
+        
+        try {
+            // First test backend health
+            const backendUrl = window.AI_NAV_CONFIG.getBackendUrl();
+            console.log('Testing backend health at:', backendUrl + '/health');
+            
+            const healthResponse = await fetch(backendUrl + '/health');
+            if (!healthResponse.ok) {
+                throw new Error(`Backend not responding (HTTP ${healthResponse.status})`);
+            }
+            
+            const healthData = await healthResponse.json();
+            console.log('✅ Backend health check passed:', healthData);
+            
+            // Now test stream connectivity
+            const result = await this.videoController.testStreamConnectivity();
+            
+            if (result.success) {
+                console.log('✅ Video stream test passed');
+                this.updateSystemStatus('ready', `Video stream test passed (${result.contentType || 'unknown type'})`);
+                
+                // Try to connect to the stream
+                if (!this.videoController.isStreamConnected()) {
+                    console.log('Attempting to connect to video stream...');
+                    this.videoController.connectToStream();
+                }
+            } else {
+                console.error('❌ Video stream test failed:', result.error);
+                this.updateSystemStatus('error', `Video stream test failed: ${result.error}`);
+            }
+        } catch (error) {
+            console.error('❌ Video stream test error:', error);
+            this.updateSystemStatus('error', `Test failed: ${error.message}`);
+        } finally {
+            testBtn.textContent = originalText;
+            testBtn.disabled = false;
+        }
+    }
+
+    debugConfiguration() {
+        console.log('🔧 Frontend Configuration Debug:');
+        console.log('  Environment:', window.AI_NAV_CONFIG.isDevelopment() ? 'Development' : 'Production');
+        console.log('  Current hostname:', window.location.hostname);
+        console.log('  Backend URL:', window.AI_NAV_CONFIG.getBackendUrl());
+        console.log('  WebSocket URL:', window.AI_NAV_CONFIG.getWebSocketUrl());
+        console.log('  Video Stream URL:', window.AI_NAV_CONFIG.getVideoStreamUrl());
+        console.log('  Is HTTPS Page:', window.AI_NAV_CONFIG.isHttpsPage());
+        console.log('  Mixed Content Issue:', window.AI_NAV_CONFIG.hasMixedContentIssue());
+        
+        return {
+            environment: window.AI_NAV_CONFIG.isDevelopment() ? 'Development' : 'Production',
+            hostname: window.location.hostname,
+            backendUrl: window.AI_NAV_CONFIG.getBackendUrl(),
+            websocketUrl: window.AI_NAV_CONFIG.getWebSocketUrl(),
+            videoStreamUrl: window.AI_NAV_CONFIG.getVideoStreamUrl(),
+            isHttps: window.AI_NAV_CONFIG.isHttpsPage(),
+            mixedContent: window.AI_NAV_CONFIG.hasMixedContentIssue()
+        };
+    }
+
+    refreshVideoStream() {
+        console.log('🔄 Refreshing video stream...');
+        
+        if (this.videoController) {
+            // Disconnect and reconnect
+            this.videoController.disconnect();
+            setTimeout(() => {
+                this.videoController.connectToStream();
+            }, 1000);
+        }
     }
 
     initializeVideoController() {
@@ -849,6 +1166,18 @@ class NavigationApp {
     setupEventListeners() {
         const startStopBtn = document.getElementById('startStopBtn');
         startStopBtn.addEventListener('click', () => this.toggleNavigation());
+        
+        const testVideoBtn = document.getElementById('testVideoBtn');
+        testVideoBtn.addEventListener('click', () => this.testVideoStream());
+        
+        // Add double-click to refresh video stream
+        const videoElement = document.getElementById('videoStream');
+        if (videoElement) {
+            videoElement.addEventListener('dblclick', () => {
+                console.log('Double-click detected - refreshing video stream');
+                this.refreshVideoStream();
+            });
+        }
     }
 
     initializeWebSocket() {
@@ -915,23 +1244,24 @@ class NavigationApp {
             urgency = 'urgent';
         }
 
-        // FIXED: Allow emergency/urgent audio even when navigation is not active
-        // This ensures connection lost alerts and critical warnings always play
-        if (urgency === 'emergency' || urgency === 'urgent') {
-            console.log('Playing emergency/urgent audio regardless of navigation state:', text);
-            this.audioSystem.speak(text, urgency);
-            this.showVisualAlert(text, urgency);
-            return;
-        }
-        
-        // Only play normal audio guidance when navigation is active
-        if (!this.isNavigating) {
-            console.log('Navigation not active - normal audio guidance muted:', text);
-            return;
+        // Check rate limit status for debugging
+        const rateLimitStatus = this.audioSystem.getRateLimitStatus();
+        if (!rateLimitStatus.canPlayAudio && urgency !== 'emergency') {
+            console.log(`⏱️ Audio rate limited: ${text} (${Math.ceil(rateLimitStatus.remainingTime/1000)}s remaining)`);
         }
 
-        // Speak normal guidance messages only during active navigation
-        this.audioSystem.speak(text, urgency);
+        // Speak the message with appropriate urgency (rate limiting handled in AudioFeedbackSystem)
+        const audioPlayed = this.audioSystem.speak(text, urgency);
+        
+        // Also show visual feedback for important messages
+        if (urgency === 'emergency' || urgency === 'urgent') {
+            this.showVisualAlert(text, urgency);
+        }
+        
+        // Show rate limit indicator in UI if audio was blocked
+        if (!audioPlayed && urgency !== 'emergency') {
+            this.showRateLimitIndicator(rateLimitStatus.remainingTime);
+        }
     }
     
     showVisualFeedback(text, currentState) {
@@ -1010,6 +1340,35 @@ class NavigationApp {
                 }
             }, 300);
         }, 4000);
+    }
+
+    showRateLimitIndicator(remainingTimeMs) {
+        // Show a small indicator that audio was rate limited
+        const indicator = document.createElement('div');
+        indicator.className = 'rate-limit-indicator';
+        indicator.textContent = `🔇 Audio limited (${Math.ceil(remainingTimeMs/1000)}s)`;
+
+        indicator.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #757575;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            z-index: 999;
+            opacity: 0.8;
+        `;
+        
+        document.body.appendChild(indicator);
+
+        // Remove indicator after 2 seconds
+        setTimeout(() => {
+            if (indicator.parentNode) {
+                indicator.parentNode.removeChild(indicator);
+            }
+        }, 2000);
     }
 
     handleStateChange(state, message) {
@@ -1120,7 +1479,7 @@ class NavigationApp {
                 
                 // Update audio status to show guidance is muted
                 const audioStatus = document.getElementById('audioStatus');
-                audioStatus.textContent = 'Ready (guidance muted)';
+                audioStatus.textContent = 'Ready';
                 audioStatus.className = 'status-value ready';
                 
                 // Stop audio guidance but keep video stream
@@ -1143,8 +1502,8 @@ class NavigationApp {
                     
                     // Update audio status to show guidance is active
                     const audioStatus = document.getElementById('audioStatus');
-                    audioStatus.textContent = 'Guidance Active';
-                    audioStatus.className = 'status-value active';
+                    audioStatus.textContent = 'Ready';
+                    audioStatus.className = 'status-value ready';
                     
                     // Test audio immediately when starting navigation
                     this.audioSystem.speak("Navigation system activated. Audio test successful.", 'normal');

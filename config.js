@@ -4,18 +4,21 @@
 const CONFIG = {
   // Backend URL configuration
   getBackendUrl: () => {
-    // Detect if running locally
+    // Detect if running locally or from file system
     const isLocalhost = window.location.hostname === 'localhost' || 
                        window.location.hostname === '127.0.0.1' ||
                        window.location.hostname.includes('localhost');
+    const isFileProtocol = window.location.protocol === 'file:';
     
-    if (isLocalhost) {
-      // Use local backend when running on localhost
+    if (isLocalhost || isFileProtocol) {
+      // Use local backend when running on localhost or from filesystem
       return 'http://localhost:8000';
+    } else if (window.location.hostname.includes('github.io')) {
+      // For GitHub Pages, use the ngrok URL
+      return 'https://flagless-clinographic-janita.ngrok-free.dev';
     } else {
-      // For GitHub Pages or other production environments, return empty string
-      // so users can manually enter their backend URL
-      return '';
+      // Fallback for other environments
+      return 'http://localhost:8000';
     }
   },
   
@@ -49,6 +52,15 @@ const CONFIG = {
   
   // Get direct backend URL without proxy
   getDirectBackendUrl: () => {
+    // First try to use local backend if available
+    const isLocalhost = window.location.hostname === 'localhost' || 
+                        window.location.hostname === '127.0.0.1' ||
+                        window.location.hostname.includes('localhost');
+    const isFileProtocol = window.location.protocol === 'file:';
+    
+    if (isLocalhost || isFileProtocol) {
+      return 'http://localhost:8000';
+    }
     return 'https://flagless-clinographic-janita.ngrok-free.dev';
   },
   
@@ -75,7 +87,9 @@ const CONFIG = {
   
   // Environment detection
   isDevelopment: () => {
-    return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    return window.location.hostname === 'localhost' || 
+           window.location.hostname === '127.0.0.1' || 
+           window.location.protocol === 'file:';
   },
   
   isProduction: () => {

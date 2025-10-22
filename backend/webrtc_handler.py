@@ -370,11 +370,23 @@ class WebRTCConnectionManager:
                     logger.debug(f"Queuing frame from {client_id} for parallel processing")
                     
                     # Convert WebRTC frame to OpenCV format
-                    # TODO: Implement proper aiortc frame conversion
-                    # For now, use a placeholder frame to avoid compilation errors
                     import numpy as np
-                    logger.info(f"Processing frame from {client_id} (using placeholder for now)")
-                    img = np.zeros((480, 640, 3), dtype=np.uint8)  # Placeholder frame
+                    import av
+                    logger.info(f"Processing frame from {client_id}")
+                    # Convert aiortc VideoFrame to numpy array
+                    if hasattr(frame, 'to_ndarray'):
+                        img = frame.to_ndarray(format='bgr24')
+                    else:
+                        # Convert using PyAV as fallback
+                        pyav_frame = av.VideoFrame.from_ndarray(
+                            np.array(frame.planes[0]), format='bgr24'
+                        )
+                        img = pyav_frame.to_ndarray(format='bgr24')
+                    
+                    # If conversion failed or frame is too small, use a placeholder
+                    if img is None or img.size == 0 or img.shape[0] < 10 or img.shape[1] < 10:
+                        logger.warning(f"Invalid frame from {client_id}, using placeholder")
+                        img = np.zeros((480, 640, 3), dtype=np.uint8)  # Placeholder frame
                     
                     # Queue frame for parallel processing (non-blocking)
                     frame_data = {

@@ -242,6 +242,18 @@ h1 {
     box-shadow: 0 6px 20px rgba(244, 67, 54, 0.4);
 }
 
+.control-btn.test {
+    background-color: #2196F3;
+    color: white;
+    box-shadow: 0 4px 15px rgba(33, 150, 243, 0.3);
+}
+
+.control-btn.test:hover {
+    background-color: #1976D2;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(33, 150, 243, 0.4);
+}
+
 .control-btn:active {
     transform: translateY(0);
 }

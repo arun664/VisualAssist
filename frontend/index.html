@@ -18,7 +18,9 @@
 
         <main class="main-content">
             <div class="video-container">
-                <img id="videoStream" src="" alt="Navigation Video Stream" class="video-display">
+                <video id="videoStream" autoplay muted playsinline class="video-display">
+                    <p>Your browser does not support video streaming.</p>
+                </video>
                 <div class="video-overlay">
                     <div id="loadingSpinner" class="loading-spinner hidden">
                         <div class="spinner"></div>
@@ -42,6 +44,9 @@
                 <button id="startStopBtn" class="control-btn start" aria-label="Start or stop navigation">
                     <span class="btn-text">Start Navigation</span>
                 </button>
+                <button id="testVideoBtn" class="control-btn test" aria-label="Test video stream connectivity">
+                    <span class="btn-text">Test Video Stream</span>
+                </button>
             </div>
 
             <div class="status-panel">
@@ -64,7 +69,7 @@
             <p class="accessibility-note">This interface is optimized for screen readers and voice navigation</p>
         </footer>
     </div>
-    <script src="config.js"></script>
-    <script src="app.js"></script>
+    <script src="config.js?v=1729616250"></script>
+    <script src="app.js?v=1729616250"></script>
 </body>
 </html>

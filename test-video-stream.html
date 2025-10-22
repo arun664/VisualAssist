@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Stream Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { border: 1px solid #ccc; padding: 15px; margin: 15px 0; border-radius: 5px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #d1ecf1; color: #0c5460; }
+        button { padding: 10px 15px; margin: 5px; }
+        img { max-width: 100%; border: 1px solid #ccc; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>Video Stream Connectivity Test</h1>
+    
+    <div class="test-section">
+        <h2>Configuration Test</h2>
+        <div id="config-results">Loading...</div>
+        <button onclick="testConfiguration()">Test Configuration</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>Backend Health Test</h2>
+        <div id="health-results">Ready to test</div>
+        <button onclick="testBackendHealth()">Test Backend Health</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>Video Stream Test</h2>
+        <div id="stream-results">Ready to test</div>
+        <button onclick="testVideoStream()">Test Video Stream</button>
+        <button onclick="loadVideoStream()">Load Video Stream</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>Live Video Stream</h2>
+        <img id="testVideoElement" src="" alt="Test Video Stream" style="display: none;">
+        <div id="video-status">No stream loaded</div>
+    </div>
+
+    <script src="config.js"></script>
+    <script>
+        function addResult(containerId, message, type = 'info') {
+            const container = document.getElementById(containerId);
+            const div = document.createElement('div');
+            div.className = `status ${type}`;
+            div.innerHTML = message;
+            container.appendChild(div);
+        }
+        
+        function clearResults(containerId) {
+            document.getElementById(containerId).innerHTML = '';
+        }
+        
+        function testConfiguration() {
+            clearResults('config-results');
+            
+            const config = {
+                hostname: window.location.hostname,
+                protocol: window.location.protocol,
+                isDevelopment: window.AI_NAV_CONFIG.isDevelopment(),
+                isProduction: window.AI_NAV_CONFIG.isProduction(),
+                backendUrl: window.AI_NAV_CONFIG.getBackendUrl(),
+                websocketUrl: window.AI_NAV_CONFIG.getWebSocketUrl(),
+                videoStreamUrl: window.AI_NAV_CONFIG.getVideoStreamUrl(),
+                isHttps: window.AI_NAV_CONFIG.isHttpsPage(),
+                mixedContent: window.AI_NAV_CONFIG.hasMixedContentIssue()
+            };
+            
+            addResult('config-results', '<strong>Configuration:</strong><pre>' + JSON.stringify(config, null, 2) + '</pre>', 'info');
+            
+            if (!config.backendUrl || config.backendUrl === '') {
+                addResult('config-results', '❌ Backend URL is empty - this will cause video stream issues', 'error');
+            } else {
+                addResult('config-results', '✅ Backend URL configured: ' + config.backendUrl, 'success');
+            }
+        }
+        
+        async function testBackendHealth() {
+            clearResults('health-results');
+            
+            const backendUrl = window.AI_NAV_CONFIG.getBackendUrl();
+            if (!backendUrl) {
+                addResult('health-results', '❌ Backend URL not configured', 'error');
+                return;
+            }
+            
+            try {
+                addResult('health-results', 'Testing: ' + backendUrl + '/health', 'info');
+                
+                const response = await fetch(backendUrl + '/health');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    addResult('health-results', '✅ Backend health check passed', 'success');
+                    addResult('health-results', '<pre>' + JSON.stringify(data, null, 2) + '</pre>', 'info');
+                } else {
+                    addResult('health-results', `❌ Backend health check failed: HTTP ${response.status}`, 'error');
+                }
+            } catch (error) {
+                addResult('health-results', `❌ Backend health check error: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testVideoStream() {
+            clearResults('stream-results');
+            
+            const videoStreamUrl = window.AI_NAV_CONFIG.getVideoStreamUrl();
+            if (!videoStreamUrl || videoStreamUrl === '/processed_video_stream') {
+                addResult('stream-results', '❌ Video stream URL invalid: ' + videoStreamUrl, 'error');
+                return;
+            }
+            
+            try {
+                addResult('stream-results', 'Testing: ' + videoStreamUrl, 'info');
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                
+                const response = await fetch(videoStreamUrl, {
+                    method: 'GET',
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (response.ok) {
+                    const contentType = response.headers.get('content-type');
+                    addResult('stream-results', `✅ Video stream accessible (HTTP ${response.status})`, 'success');
+                    addResult('stream-results', `Content-Type: ${contentType}`, 'info');
+                    
+                    if (contentType && contentType.includes('multipart/x-mixed-replace')) {
+                        addResult('stream-results', '✅ Correct MJPEG stream format', 'success');
+                    } else {
+                        addResult('stream-results', '⚠️ Not MJPEG format - may not work properly', 'error');
+                    }
+                } else {
+                    addResult('stream-results', `❌ Video stream failed: HTTP ${response.status}`, 'error');
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    addResult('stream-results', '❌ Video stream test timeout', 'error');
+                } else {
+                    addResult('stream-results', `❌ Video stream test error: ${error.message}`, 'error');
+                }
+            }
+        }
+        
+        function loadVideoStream() {
+            const videoElement = document.getElementById('testVideoElement');
+            const statusDiv = document.getElementById('video-status');
+            const videoStreamUrl = window.AI_NAV_CONFIG.getVideoStreamUrl();
+            
+            if (!videoStreamUrl || videoStreamUrl === '/processed_video_stream') {
+                statusDiv.innerHTML = '<span style="color: red;">❌ Video stream URL invalid</span>';
+                return;
+            }
+            
+            statusDiv.innerHTML = 'Loading video stream...';
+            videoElement.style.display = 'block';
+            
+            videoElement.onload = () => {
+                statusDiv.innerHTML = '<span style="color: green;">✅ Video stream loaded successfully</span>';
+            };
+            
+            videoElement.onerror = (error) => {
+                statusDiv.innerHTML = '<span style="color: red;">❌ Video stream load error</span>';
+                console.error('Video load error:', error);
+            };
+            
+            const timestampedUrl = `${videoStreamUrl}?t=${Date.now()}`;
+            videoElement.src = timestampedUrl;
+            
+            console.log('Loading video stream:', timestampedUrl);
+        }
+        
+        // Auto-run configuration test on load
+        window.onload = function() {
+            testConfiguration();
+        };
+    </script>
+</body>
+</html>

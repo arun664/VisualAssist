@@ -266,27 +266,72 @@ async def video_stream():
         """Generate MJPEG stream with processed video frames"""
         import time
         import cv2
+        import numpy as np
+        from datetime import datetime
         
         # Create a test frame for demonstration when no WebRTC frames available
         test_frame = create_test_frame()
         
+        # Frame counter and timestamp tracking for diagnostics
+        frame_count = 0
+        last_log_time = time.time()
+        last_frame_time = time.time()
+        
         while True:
             try:
+                current_time = time.time()
+                frame_count += 1
+                
+                # Log streaming statistics every 5 seconds
+                if current_time - last_log_time > 5:
+                    fps = frame_count / (current_time - last_log_time)
+                    logger.info(f"MJPEG stream stats: {fps:.1f} FPS, {frame_count} frames streamed in last 5 seconds")
+                    frame_count = 0
+                    last_log_time = current_time
+                
                 # Try to get processed frame from WebRTC handler
                 processed_frame = None
                 
                 # Get latest processed frame from WebRTC connections
                 if hasattr(webrtc_manager, 'get_latest_processed_frame'):
                     processed_frame = webrtc_manager.get_latest_processed_frame()
+                    if processed_frame is not None:
+                        logger.debug("Using frame from WebRTC handler")
                 
                 # If no WebRTC frame available, use test frame with processing
                 if processed_frame is None:
                     vision_proc = get_vision_processor()
-                    processing_results = asyncio.run(vision_proc.process_frame_complete(test_frame))
-                    processed_frame = processing_results.get("processed_frame", test_frame)
+                    try:
+                        logger.debug("No WebRTC frame available, processing test frame")
+                        # Use asyncio properly in this context
+                        loop = asyncio.get_event_loop()
+                        processing_results = loop.run_until_complete(vision_proc.process_frame_complete(test_frame))
+                        processed_frame = processing_results.get("processed_frame", test_frame)
+                    except RuntimeError as e:
+                        if "There is no current event loop in thread" in str(e):
+                            # Create new event loop if needed
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            processing_results = loop.run_until_complete(vision_proc.process_frame_complete(test_frame))
+                            processed_frame = processing_results.get("processed_frame", test_frame)
+                        else:
+                            raise
+                
+                # Add a timestamp to the frame for diagnostics
+                frame_with_timestamp = processed_frame.copy()
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                stream_latency = (time.time() - last_frame_time) * 1000  # in ms
+                last_frame_time = time.time()
+                
+                cv2.putText(
+                    frame_with_timestamp, 
+                    f"Time: {timestamp} | Latency: {stream_latency:.1f}ms", 
+                    (10, frame_with_timestamp.shape[0] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1
+                )
                 
                 # Encode frame as JPEG
-                ret, buffer = cv2.imencode('.jpg', processed_frame, 
+                ret, buffer = cv2.imencode('.jpg', frame_with_timestamp, 
                                          [cv2.IMWRITE_JPEG_QUALITY, 80])
                 
                 if ret:
@@ -307,16 +352,27 @@ async def video_stream():
                         yield frame_bytes
                         yield b"\r\n"
                 
-                time.sleep(0.033)  # ~30 FPS
+                # Adaptive frame rate - sleep less if processing is slow
+                processing_time = time.time() - current_time
+                sleep_time = max(0.01, 0.033 - processing_time)  # Target ~30 FPS but minimum 10ms sleep
+                time.sleep(sleep_time)
                 
             except Exception as e:
                 logger.error(f"Error in MJPEG stream generation: {e}")
                 # Continue with next frame on error
                 time.sleep(0.1)
     
+    # Set response headers to prevent caching which can cause issues with MJPEG streams
+    headers = {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+    }
+    
     return StreamingResponse(
         generate_mjpeg_stream(),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers=headers
     )
 
 def create_test_frame():
