@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
     - name: Checkout code
@@ -51,7 +52,7 @@ jobs:
         echo "Creating dist directory and copying site files..."
         mkdir -p dist
 
-        # Copy the frontend site files into dist
+        # Copy the frontend site files into dist, excluding index.html initially
         if [ -d frontend ]; then
           cp -r frontend/* dist/ || true
         fi
@@ -62,9 +63,10 @@ jobs:
           cp -r client/* dist/client/ || true
         fi
 
-        # Ensure frontend.html exists in dist (use frontend/index.html if present)
-        if [ -f frontend/index.html ]; then
-          cp frontend/index.html dist/frontend.html
+        # Rename frontend/index.html to frontend.html in dist
+        if [ -f dist/index.html ]; then
+          mv dist/index.html dist/frontend.html
+          echo "Moved frontend index.html to frontend.html"
         fi
 
         # Create a lightweight root index that links to frontend.html
@@ -81,6 +83,9 @@ jobs:
           </body>
         </html>
         EOF
+
+        # Create .nojekyll file to disable Jekyll processing
+        touch dist/.nojekyll
 
         echo "Deployment structure created. Files in dist:"
         find dist -maxdepth 2 -type f | sed -n '1,40p'
