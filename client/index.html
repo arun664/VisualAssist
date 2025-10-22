@@ -43,8 +43,29 @@
             </div>
         </div>
 
-        <!-- Media Controls -->
+        <!-- Step 1: Connection Management -->
+        <div class="connection-section">
+            <h3>Step 1: Connect to Backend Server (Optional)</h3>
+            <div class="server-config">
+                <label for="serverUrl">Backend Server URL:</label>
+                <input type="text" id="serverUrl" value="" placeholder="Backend URL will be auto-detected">
+            </div>
+            <div class="connection-controls">
+                <button id="connectBtn" class="control-btn connect-btn" disabled>
+                    Connect to Backend
+                </button>
+                <button id="disconnectBtn" class="control-btn disconnect-btn" disabled>
+                    Disconnect
+                </button>
+                <button id="testWebRTCBtn" class="control-btn test-btn">
+                    Test WebRTC Connectivity
+                </button>
+            </div>
+        </div>
+
+        <!-- Step 2: Media Controls -->
         <div class="media-controls">
+            <h3>Step 2: Enable Camera and Microphone</h3>
             <div class="permission-controls">
                 <button id="requestCameraBtn" class="control-btn camera-btn">
                     <span class="btn-icon">📹</span>
@@ -59,31 +80,15 @@
                     Enable Microphone
                 </button>
             </div>
+            
+            <!-- Step 3: Streaming Controls -->
+            <h3>Step 3: Start Streaming</h3>
             <div class="stream-controls">
                 <button id="startStreamBtn" class="control-btn primary" disabled>
                     Start Streaming to Backend
                 </button>
                 <button id="stopStreamBtn" class="control-btn secondary" disabled>
                     Stop Streaming to Backend
-                </button>
-            </div>
-        </div>
-
-        <!-- Connection Management -->
-        <div class="connection-section">
-            <div class="server-config">
-                <label for="serverUrl">Backend Server URL:</label>
-                <input type="text" id="serverUrl" value="" placeholder="Backend URL will be auto-detected">
-            </div>
-            <div class="connection-controls">
-                <button id="connectBtn" class="control-btn connect-btn" disabled>
-                    Connect to Backend
-                </button>
-                <button id="disconnectBtn" class="control-btn disconnect-btn" disabled>
-                    Disconnect
-                </button>
-                <button id="testWebRTCBtn" class="control-btn test-btn">
-                    Test WebRTC Connectivity
                 </button>
             </div>
         </div>
@@ -161,8 +166,14 @@
         document.addEventListener('DOMContentLoaded', () => {
             const serverUrlInput = document.getElementById('serverUrl');
             const backendUrl = window.AI_NAV_CONFIG.getBackendUrl();
-            serverUrlInput.value = backendUrl;
-            console.log('🔧 Auto-configured backend URL:', backendUrl);
+            
+            if (backendUrl) {
+                serverUrlInput.value = backendUrl;
+                console.log('🔧 Auto-configured backend URL:', backendUrl);
+            } else {
+                serverUrlInput.placeholder = 'Enter your backend server URL (e.g., http://localhost:8000)';
+                console.log('🔧 No backend URL configured - user must enter manually');
+            }
         });
     </script>
 </body>

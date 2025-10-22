@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Connection Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .test-button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background: #45a049;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .warning { background: #fff3cd; color: #856404; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        pre {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+            max-height: 300px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 WebRTC Connection Test Tool</h1>
+    
+    <div class="test-section">
+        <h2>1. Browser Support Test</h2>
+        <button class="test-button" onclick="testBrowserSupport()">Test Browser Support</button>
+        <div id="browserResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Backend Connection Test</h2>
+        <input type="text" id="backendUrl" value="http://localhost:8000" placeholder="Backend URL" style="width: 300px; padding: 5px;">
+        <button class="test-button" onclick="testBackendConnection()">Test Backend</button>
+        <div id="backendResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. ICE/STUN Server Test</h2>
+        <button class="test-button" onclick="testIceServers()">Test ICE Connectivity</button>
+        <div id="iceResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. WebRTC Offer/Answer Test</h2>
+        <button class="test-button" onclick="testWebRTCFlow()">Test WebRTC Flow</button>
+        <div id="webrtcResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>5. Network Diagnostics</h2>
+        <button class="test-button" onclick="runNetworkDiagnostics()">Run Diagnostics</button>
+        <div id="diagnosticsResult"></div>
+    </div>
+
+    <script>
+        function showResult(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        function appendResult(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.innerHTML += `<div class="status ${type}">${message}</div>`;
+        }
+
+        function testBrowserSupport() {
+            showResult('browserResult', 'Testing browser support...', 'info');
+            
+            const tests = {
+                'getUserMedia': !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+                'RTCPeerConnection': !!window.RTCPeerConnection,
+                'WebSocket': !!window.WebSocket,
+                'Fetch API': !!window.fetch
+            };
+            
+            let allPassed = true;
+            let results = '<h4>Browser Support Results:</h4><ul>';
+            
+            for (const [test, passed] of Object.entries(tests)) {
+                results += `<li>${test}: ${passed ? '✅ Supported' : '❌ Not Supported'}</li>`;
+                if (!passed) allPassed = false;
+            }
+            
+            results += '</ul>';
+            
+            if (allPassed) {
+                results += '<div class="status success">✅ All required APIs are supported!</div>';
+            } else {
+                results += '<div class="status error">❌ Some required APIs are missing. WebRTC may not work properly.</div>';
+            }
+            
+            showResult('browserResult', results);
+        }
+
+        async function testBackendConnection() {
+            const url = document.getElementById('backendUrl').value;
+            showResult('backendResult', 'Testing backend connection...', 'info');
+            
+            try {
+                const response = await fetch(`${url}/health`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    appendResult('backendResult', `✅ Backend connected successfully!<pre>${JSON.stringify(data, null, 2)}</pre>`, 'success');
+                } else {
+                    appendResult('backendResult', `❌ Backend responded with error: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                appendResult('backendResult', `❌ Backend connection failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testIceServers() {
+            showResult('iceResult', 'Testing ICE/STUN servers...', 'info');
+            
+            const iceServers = [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun.cloudflare.com:3478' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ];
+            
+            try {
+                const pc = new RTCPeerConnection({ iceServers });
+                let candidateCount = 0;
+                let gatheringComplete = false;
+                
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        candidateCount++;
+                        appendResult('iceResult', `Found ICE candidate: ${event.candidate.type} (${event.candidate.protocol})`, 'info');
+                    } else {
+                        gatheringComplete = true;
+                        appendResult('iceResult', `✅ ICE gathering completed. Found ${candidateCount} candidates.`, 'success');
+                        pc.close();
+                    }
+                };
+                
+                pc.onicegatheringstatechange = () => {
+                    appendResult('iceResult', `ICE gathering state: ${pc.iceGatheringState}`, 'info');
+                };
+                
+                // Create a dummy offer to trigger ICE gathering
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                // Timeout after 10 seconds
+                setTimeout(() => {
+                    if (!gatheringComplete) {
+                        appendResult('iceResult', '⚠️ ICE gathering timeout - may indicate network issues', 'warning');
+                        pc.close();
+                    }
+                }, 10000);
+                
+            } catch (error) {
+                appendResult('iceResult', `❌ ICE test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testWebRTCFlow() {
+            const url = document.getElementById('backendUrl').value;
+            showResult('webrtcResult', 'Testing WebRTC offer/answer flow...', 'info');
+            
+            try {
+                const pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+                
+                // Create offer
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                appendResult('webrtcResult', '✅ Created WebRTC offer', 'success');
+                
+                // Send to backend
+                const response = await fetch(`${url}/webrtc/offer`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        client_id: 'test_client_' + Date.now(),
+                        type: offer.type,
+                        sdp: offer.sdp
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    appendResult('webrtcResult', '✅ Backend accepted offer and returned answer', 'success');
+                    
+                    // Set remote description
+                    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                    appendResult('webrtcResult', '✅ WebRTC offer/answer exchange completed successfully!', 'success');
+                } else {
+                    appendResult('webrtcResult', `❌ Backend rejected offer: ${response.status}`, 'error');
+                }
+                
+                pc.close();
+                
+            } catch (error) {
+                appendResult('webrtcResult', `❌ WebRTC flow failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function runNetworkDiagnostics() {
+            showResult('diagnosticsResult', 'Running network diagnostics...', 'info');
+            
+            // Test various network conditions
+            const tests = [
+                { name: 'DNS Resolution', test: () => fetch('https://www.google.com/favicon.ico', { mode: 'no-cors' }) },
+                { name: 'HTTPS Connectivity', test: () => fetch('https://httpbin.org/get') },
+                { name: 'WebSocket Test', test: testWebSocket }
+            ];
+            
+            for (const { name, test } of tests) {
+                try {
+                    await test();
+                    appendResult('diagnosticsResult', `✅ ${name}: OK`, 'success');
+                } catch (error) {
+                    appendResult('diagnosticsResult', `❌ ${name}: ${error.message}`, 'error');
+                }
+            }
+        }
+
+        function testWebSocket() {
+            return new Promise((resolve, reject) => {
+                try {
+                    const ws = new WebSocket('wss://echo.websocket.org/');
+                    ws.onopen = () => {
+                        ws.close();
+                        resolve();
+                    };
+                    ws.onerror = reject;
+                    setTimeout(() => reject(new Error('WebSocket timeout')), 5000);
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        }
+
+        // Auto-run browser support test on load
+        window.onload = () => testBrowserSupport();
+    </script>
+</body>
+</html>

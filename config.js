@@ -13,8 +13,9 @@ const CONFIG = {
       // Use local backend when running on localhost
       return 'http://localhost:8000';
     } else {
-      // Use ngrok HTTPS tunnel URL for production
-      return 'https://flagless-clinographic-janita.ngrok-free.dev';
+      // For GitHub Pages or other production environments, return empty string
+      // so users can manually enter their backend URL
+      return '';
     }
   },
   

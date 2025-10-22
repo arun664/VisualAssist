@@ -81,13 +81,9 @@ class NavigationClient {
     }
 
     init() {
-        // Check if user is already authenticated
-        if (this.authManager.checkStoredAuth()) {
-            this.hideAuthModal();
-            this.initializeApp();
-        } else {
-            this.showAuthModal();
-        }
+        // Skip authentication for now - initialize app directly
+        this.hideAuthModal();
+        this.initializeApp();
         this.setupAuthEventListeners();
     }
 
@@ -180,12 +176,42 @@ class NavigationClient {
         // Set up event handlers
         this.peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                console.log('ICE candidate generated:', event.candidate.type, event.candidate.candidate);
+                console.log('ICE candidate generated:', {
+                    type: event.candidate.type,
+                    protocol: event.candidate.protocol,
+                    candidate: event.candidate.candidate.substring(0, 50) + '...'
+                });
                 // Note: No WebSocket for ICE candidates in this implementation
                 // ICE candidates are handled via HTTP polling or other mechanisms
             } else {
                 console.log('ICE gathering completed');
             }
+        };
+        
+        // Add ICE connection state monitoring
+        this.peerConnection.oniceconnectionstatechange = () => {
+            const iceState = this.peerConnection.iceConnectionState;
+            console.log('ICE connection state changed to:', iceState);
+            document.getElementById('iceState').textContent = iceState;
+            
+            switch (iceState) {
+                case 'connected':
+                case 'completed':
+                    console.log('✅ ICE connection established successfully');
+                    break;
+                case 'failed':
+                    console.log('❌ ICE connection failed - may need TURN servers');
+                    this.handleIceConnectionFailure();
+                    break;
+                case 'disconnected':
+                    console.log('⚠️ ICE connection disconnected');
+                    break;
+            }
+        };
+        
+        // Add ICE gathering state monitoring
+        this.peerConnection.onicegatheringstatechange = () => {
+            console.log('ICE gathering state changed to:', this.peerConnection.iceGatheringState);
         };
         
         this.peerConnection.onconnectionstatechange = () => {
@@ -586,6 +612,21 @@ class NavigationClient {
         document.getElementById('requestCameraBtn').disabled = false;
         document.getElementById('requestMicBtn').disabled = false;
         this.updateStreamButton(); // Re-enable based on current state
+    }
+
+    handleIceConnectionFailure() {
+        console.log('🧊 ICE connection failed - this usually indicates NAT/firewall issues');
+        this.showError('WebRTC connection failed: Network/firewall may be blocking connection. Consider using TURN servers.');
+        
+        // Attempt to restart ICE if possible
+        if (this.peerConnection && this.peerConnection.iceConnectionState === 'failed') {
+            console.log('Attempting ICE restart...');
+            try {
+                this.peerConnection.restartIce();
+            } catch (error) {
+                console.error('ICE restart failed:', error);
+            }
+        }
     }
 
     retryConnection() {
@@ -1039,17 +1080,25 @@ class NavigationClient {
             document.getElementById('startStreamBtn').disabled = true;
             document.getElementById('stopStreamBtn').disabled = false;
             
-            // Now check backend connection (don't auto-connect, just check status)
+            // Now automatically connect to backend if not already connected
             if (!this.isConnected) {
-                console.log('Local stream ready - backend not connected yet');
-                this.updateStreamStatus('Local only (backend disconnected)');
-                this.showError('Connect to backend first using the "Connect to Backend" button before streaming to server');
-                return;
+                console.log('Local stream ready - connecting to backend...');
+                this.updateStreamStatus('Connecting to backend...');
+                try {
+                    await this.connectToServer();
+                    console.log('Successfully connected to backend');
+                } catch (error) {
+                    console.warn('Failed to connect to backend:', error.message);
+                    this.showError('Backend connection failed - streaming locally only: ' + error.message);
+                    this.updateStreamStatus('Local only (backend unavailable)');
+                    // Continue with local streaming even if backend connection fails
+                    return;
+                }
             }
             
-            // Backend already connected - set up WebRTC streaming
-            console.log('Backend connected - setting up WebRTC streaming...');
-            this.updateStreamStatus('Connecting to backend...');
+            // Backend connection successful - set up WebRTC
+            console.log('Setting up WebRTC connection...');
+            this.updateStreamStatus('Setting up WebRTC...');
             
             // Test WebRTC connectivity first
             console.log('Testing WebRTC connectivity before establishing connection...');
@@ -1138,39 +1187,20 @@ class NavigationClient {
             
             // Test server connectivity with a simple HTTP request
             const testUrl = serverUrl.replace(/\/$/, '') + '/health';
-            console.log('Testing server connectivity at:', testUrl);
-            
-            // Add a small delay to avoid conflicts with any ongoing requests
-            await new Promise(resolve => setTimeout(resolve, 500));
             
             // Create a timeout promise
             const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Connection timeout')), 10000);
+                setTimeout(() => reject(new Error('Connection timeout')), 5000);
             });
             
             // Race between fetch and timeout
             const response = await Promise.race([
-                fetch(testUrl, { 
-                    method: 'GET',
-                    headers: {
-                        'ngrok-skip-browser-warning': 'true'
-                    }
-                }),
+                fetch(testUrl, { method: 'GET' }),
                 timeoutPromise
             ]);
             
             if (!response.ok) {
-                const errorText = await response.text();
-                console.error('Server response error:', response.status, errorText);
-                throw new Error(`Server not responding (${response.status}): ${errorText.substring(0, 100)}...`);
-            }
-            
-            // Check if response is JSON
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                const responseText = await response.text();
-                console.error('Non-JSON response received:', responseText.substring(0, 200));
-                throw new Error(`Server returned HTML instead of JSON. Check if backend is running properly.`);
+                throw new Error(`Server not responding (${response.status})`);
             }
             
             const healthData = await response.json();
