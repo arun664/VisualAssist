@@ -668,9 +668,8 @@ class AudioFeedbackSystem {
 
 class VideoDisplayController {
     constructor(onStatusChange) {
-        // Use dynamic URL based on current host
-        const backendUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
-        this.streamUrl = `${backendUrl}/processed_video_stream`;
+        // Use dynamic URL from configuration
+        this.streamUrl = window.AI_NAV_CONFIG.getVideoStreamUrl();
         this.videoElement = document.getElementById('videoStream');
         this.loadingSpinner = document.getElementById('loadingSpinner');
         this.onStatusChange = onStatusChange;
@@ -851,9 +850,8 @@ class NavigationApp {
     }
 
     initializeWebSocket() {
-        // Use dynamic URL based on current host
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.hostname}:8000/ws`;
+        // Use dynamic URL from configuration
+        const wsUrl = window.AI_NAV_CONFIG.getWebSocketUrl();
         
         this.websocketManager = new WebSocketManager(
             wsUrl,

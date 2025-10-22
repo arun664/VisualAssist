@@ -1,0 +1,53 @@
+# AI Navigation Assistant - Docker Compose Configuration
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - CORS_ORIGINS=*
+      - PYTHONPATH=/app
+    volumes:
+      - ./backend/logs:/app/logs
+      - ./backend/models:/app/models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=10)"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+
+  # Alternative simplified backend (comment out the main backend above and uncomment this for minimal mode)
+  # backend-simple:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile.simple
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     - ENVIRONMENT=production
+  #     - SERVER_HOST=0.0.0.0
+  #     - SERVER_PORT=8000
+  #     - CORS_ORIGINS=*
+  #     - PYTHONPATH=/app
+  #   volumes:
+  #     - ./backend/logs:/app/logs
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 40s
+
+networks:
+  default:
+    name: ai-navigation-network

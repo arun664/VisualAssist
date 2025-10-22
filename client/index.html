@@ -53,7 +53,7 @@
         <div class="connection-section">
             <div class="server-config">
                 <label for="serverUrl">Backend Server URL:</label>
-                <input type="text" id="serverUrl" value="http://localhost:8000" placeholder="http://localhost:8000">
+                <input type="text" id="serverUrl" value="" placeholder="Backend URL will be auto-detected">
                 <p class="connection-note">Local streaming starts first, then connects to backend automatically</p>
             </div>
             <div class="connection-controls">
@@ -132,6 +132,16 @@
             </details>
         </div>
     </div>
+    <script src="../config.js"></script>
     <script src="client.js"></script>
+    <script>
+        // Auto-configure backend URL on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            const serverUrlInput = document.getElementById('serverUrl');
+            const backendUrl = window.AI_NAV_CONFIG.getBackendUrl();
+            serverUrlInput.value = backendUrl;
+            console.log('🔧 Auto-configured backend URL:', backendUrl);
+        });
+    </script>
 </body>
 </html>

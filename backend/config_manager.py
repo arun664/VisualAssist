@@ -11,6 +11,9 @@ from typing import Dict, Any, Optional, Union
 from dataclasses import dataclass, field
 from enum import Enum
 
+# Set up logger for this module
+logger = logging.getLogger(__name__)
+
 
 class Environment(Enum):
     DEVELOPMENT = "development"
@@ -33,8 +36,8 @@ class ServerConfig:
 
 @dataclass
 class YOLOConfig:
-    """YOLO model configuration settings"""
-    model_path: str = "yolov11n.pt"
+    """YOLO model configuration settings for pretrained models"""
+    model_name: str = "yolo11n.pt"  # Pretrained model from ultralytics
     confidence_threshold: float = 0.5
     device: str = "cpu"
     
@@ -42,6 +45,16 @@ class YOLOConfig:
         # Validate confidence threshold
         if not 0.0 <= self.confidence_threshold <= 1.0:
             raise ValueError("YOLO confidence threshold must be between 0.0 and 1.0")
+        
+        # Validate model name
+        valid_models = ["yolo11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt"]
+        if self.model_name not in valid_models:
+            logger.warning(f"Model {self.model_name} not in recommended list: {valid_models}")
+    
+    @property
+    def model_path(self):
+        """Backward compatibility property"""
+        return self.model_name
 
 
 @dataclass
@@ -296,7 +309,7 @@ class ConfigManager:
         config.server.keepalive_timeout = int(os.getenv("KEEPALIVE_TIMEOUT", config.server.keepalive_timeout))
         
         # YOLO configuration
-        config.yolo.model_path = os.getenv("YOLO_MODEL_PATH", config.yolo.model_path)
+        config.yolo.model_name = os.getenv("YOLO_MODEL_PATH", config.yolo.model_name)
         config.yolo.confidence_threshold = float(os.getenv("YOLO_CONFIDENCE_THRESHOLD", config.yolo.confidence_threshold))
         config.yolo.device = os.getenv("YOLO_DEVICE", config.yolo.device)
         

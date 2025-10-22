@@ -31,6 +31,24 @@ class WebRTCConnectionManager:
         self.target_fps = 0.5  # Process 1 frame every 2 seconds
         self.last_processed_frame_time: Dict[str, float] = {}
         self.latest_processed_frame: Dict[str, any] = {}  # Store latest processed frame for MJPEG streaming
+        
+        # Parallel processing setup
+        import concurrent.futures
+        import threading
+        from queue import Queue
+        
+        # Thread pool for CPU-intensive tasks
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=4,  # Adjust based on CPU cores
+            thread_name_prefix="ai_processing"
+        )
+        
+        # Frame processing queue for each client
+        self.frame_queues: Dict[str, Queue] = {}
+        self.processing_locks: Dict[str, threading.Lock] = {}
+        
+        # Background processing status
+        self.background_processors: Dict[str, bool] = {}
     
     async def create_peer_connection(self, client_id: str) -> RTCPeerConnection:
         """Create new RTCPeerConnection for client"""
@@ -112,6 +130,179 @@ class WebRTCConnectionManager:
         
         return error_count
     
+    def _setup_parallel_processing(self, client_id: str):
+        """Setup parallel processing infrastructure for a client"""
+        from queue import Queue
+        import threading
+        
+        # Create frame queue for this client
+        self.frame_queues[client_id] = Queue(maxsize=3)  # Small buffer to prevent memory buildup
+        self.processing_locks[client_id] = threading.Lock()
+        self.background_processors[client_id] = True
+        
+        # Start background processing thread
+        processing_thread = threading.Thread(
+            target=self._background_frame_processor,
+            args=(client_id,),
+            name=f"frame_processor_{client_id}",
+            daemon=True
+        )
+        processing_thread.start()
+        
+        logger.info(f"Started parallel processing for client {client_id}")
+    
+    def _background_frame_processor(self, client_id: str):
+        """Background thread for processing frames in parallel"""
+        import asyncio
+        
+        # Create new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            while self.background_processors.get(client_id, False):
+                try:
+                    # Get frame from queue (blocking with timeout)
+                    frame_data = self.frame_queues[client_id].get(timeout=1.0)
+                    
+                    if frame_data is None:  # Shutdown signal
+                        break
+                    
+                    # Process frame asynchronously
+                    loop.run_until_complete(self._process_frame_async(client_id, frame_data))
+                    
+                except Exception as e:
+                    logger.error(f"Error in background frame processor for {client_id}: {e}")
+                    
+        finally:
+            loop.close()
+            logger.info(f"Background frame processor stopped for {client_id}")
+    
+    async def _process_frame_async(self, client_id: str, frame_data: dict):
+        """Asynchronously process a single frame with parallel AI processing"""
+        try:
+            img = frame_data['image']
+            timestamp = frame_data['timestamp']
+            
+            # Use thread pool for CPU-intensive AI processing
+            loop = asyncio.get_event_loop()
+            
+            # Parallel AI processing tasks
+            tasks = []
+            
+            # Task 1: Computer Vision Processing (CPU intensive)
+            cv_task = loop.run_in_executor(
+                self.thread_pool,
+                self._process_computer_vision_sync,
+                img
+            )
+            tasks.append(cv_task)
+            
+            # Task 2: Optical Flow (if previous frame exists) - can run in parallel
+            if hasattr(self, '_previous_frames') and client_id in self._previous_frames:
+                flow_task = loop.run_in_executor(
+                    self.thread_pool,
+                    self._process_optical_flow_sync,
+                    self._previous_frames[client_id],
+                    img
+                )
+                tasks.append(flow_task)
+            
+            # Wait for all parallel tasks to complete
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results
+            cv_results = results[0] if len(results) > 0 and not isinstance(results[0], Exception) else None
+            
+            if cv_results:
+                # Update latest processed frame
+                with self.processing_locks[client_id]:
+                    self.latest_processed_frame[client_id] = {
+                        "frame": cv_results.get("processed_frame", img),
+                        "timestamp": timestamp,
+                        "processing_time": cv_results.get("processing_time", 0),
+                        "results": cv_results
+                    }
+                
+                # Store for MJPEG streaming
+                self._store_processed_frame(client_id, cv_results.get("processed_frame", img))
+                
+                # Handle FSM processing asynchronously
+                asyncio.create_task(self._handle_fsm_async(client_id, img, cv_results))
+            
+            # Store current frame for next optical flow calculation
+            if not hasattr(self, '_previous_frames'):
+                self._previous_frames = {}
+            self._previous_frames[client_id] = img.copy()
+            
+        except Exception as e:
+            logger.error(f"Error in async frame processing for {client_id}: {e}")
+    
+    def _process_computer_vision_sync(self, img):
+        """Synchronous computer vision processing for thread pool"""
+        try:
+            from computer_vision import get_vision_processor
+            import asyncio
+            
+            # Create new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                vision_processor = get_vision_processor()
+                # Run async method in sync context
+                result = loop.run_until_complete(vision_processor.process_frame_complete(img))
+                return result
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            logger.error(f"Error in sync computer vision processing: {e}")
+            return {"processed_frame": img, "processing_time": 0}
+    
+    def _process_optical_flow_sync(self, prev_frame, curr_frame):
+        """Synchronous optical flow processing for thread pool"""
+        try:
+            import cv2
+            import numpy as np
+            
+            # Convert to grayscale
+            prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+            curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
+            
+            # Calculate optical flow
+            flow = cv2.calcOpticalFlowPyrLK(
+                prev_gray, curr_gray, 
+                np.array([[100, 100]], dtype=np.float32).reshape(-1, 1, 2),
+                None
+            )
+            
+            return {"optical_flow": flow}
+            
+        except Exception as e:
+            logger.error(f"Error in optical flow processing: {e}")
+            return {"optical_flow": None}
+    
+    async def _handle_fsm_async(self, client_id: str, img, processing_results):
+        """Handle FSM processing asynchronously"""
+        try:
+            from navigation_fsm import navigation_fsm
+            from safety_monitor import safety_monitor
+            
+            fsm_start_time = time.time()
+            await self._handle_fsm_processing(navigation_fsm, img, processing_results)
+            fsm_end_time = time.time()
+            
+            # Monitor FSM processing latency
+            await safety_monitor.monitor_processing_latency(
+                "state_transition", 
+                fsm_start_time, 
+                fsm_end_time
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in async FSM processing for {client_id}: {e}")
+    
     def _handle_video_track(self, track: MediaStreamTrack, client_id: str):
         """Handle incoming video track"""
         logger.info(f"Setting up video track handler for {client_id}")
@@ -127,16 +318,15 @@ class WebRTCConnectionManager:
         asyncio.create_task(self._process_audio_frames(track, client_id))
     
     async def _process_video_frames(self, track: MediaStreamTrack, client_id: str):
-        """Process incoming video frames with computer vision pipeline and safety monitoring"""
+        """Process incoming video frames with parallel processing and safety monitoring"""
         try:
-            from computer_vision import get_vision_processor
-            from navigation_fsm import navigation_fsm
             from safety_monitor import safety_monitor
             
-            vision_processor = get_vision_processor()
-            
-            # Initialize error tracking for this client
+            # Initialize error tracking and parallel processing for this client
             self.video_error_counts[client_id] = 0
+            self._setup_parallel_processing(client_id)
+            
+            logger.info(f"Started parallel video processing for {client_id}")
             
             while True:
                 # Check circuit breaker before processing
@@ -174,58 +364,40 @@ class WebRTCConnectionManager:
                     
                     # Process this frame - enough time has passed
                     self.last_processed_frame_time[client_id] = current_time
-                    logger.debug(f"Processing frame from {client_id} (last processed {time_since_last:.2f}s ago)")
+                    logger.debug(f"Queuing frame from {client_id} for parallel processing")
                     
                     # Convert WebRTC frame to OpenCV format
                     img = frame.to_ndarray(format="bgr24")
                     
-                    # Process frame with computer vision pipeline (with timing)
-                    processing_start_time = time.time()
-                    processing_results = await vision_processor.process_frame_complete(img)
-                    processing_end_time = time.time()
-                    
-                    # Monitor frame processing latency
-                    await safety_monitor.monitor_processing_latency(
-                        "frame_processing", 
-                        processing_start_time, 
-                        processing_end_time
-                    )
-                    
-                    # Send processing results to FSM for navigation decisions (with timing)
-                    fsm_start_time = time.time()
-                    await self._handle_fsm_processing(navigation_fsm, img, processing_results)
-                    fsm_end_time = time.time()
-                    
-                    # Monitor FSM processing latency
-                    await safety_monitor.monitor_processing_latency(
-                        "state_transition", 
-                        fsm_start_time, 
-                        fsm_end_time
-                    )
-                    
-                    # Store processed frame for MJPEG streaming
-                    processed_frame = processing_results.get("processed_frame", img)
-                    self._store_processed_frame(client_id, processed_frame)
-                    
-                    # Store latest processed frame for performance tracking
-                    self.latest_processed_frame[client_id] = {
-                        "frame": processed_frame,
+                    # Queue frame for parallel processing (non-blocking)
+                    frame_data = {
+                        "image": img,
                         "timestamp": current_time,
-                        "processing_time": processing_end_time - processing_start_time,
-                        "results": processing_results
+                        "frame_start_time": frame_start_time
                     }
                     
-                    # Monitor overall frame processing time
+                    try:
+                        # Try to add to queue (non-blocking)
+                        if client_id in self.frame_queues:
+                            self.frame_queues[client_id].put_nowait(frame_data)
+                            logger.debug(f"Frame queued for parallel processing: {client_id}")
+                        else:
+                            logger.warning(f"No processing queue found for {client_id}")
+                            
+                    except Exception as queue_error:
+                        # Queue is full - skip this frame to prevent blocking
+                        logger.debug(f"Processing queue full for {client_id}, skipping frame")
+                        
+                        # Still store raw frame for MJPEG streaming
+                        self._store_processed_frame(client_id, img)
+                    
+                    # Monitor frame reception latency (lightweight)
                     frame_end_time = time.time()
                     await safety_monitor.monitor_processing_latency(
-                        "overall_frame_processing", 
+                        "frame_reception", 
                         frame_start_time, 
                         frame_end_time
                     )
-                    
-                    logger.info(f"Processed frame from {client_id} in {frame_end_time - frame_start_time:.3f}s "
-                              f"(CV: {processing_end_time - processing_start_time:.3f}s, "
-                              f"FSM: {fsm_end_time - fsm_start_time:.3f}s)")
                     
                 except Exception as frame_error:
                     # Use circuit breaker error recording
@@ -586,7 +758,26 @@ class WebRTCConnectionManager:
             if client_id in self.latest_processed_frame:
                 del self.latest_processed_frame[client_id]
             
-            logger.info(f"Cleaned up WebRTC resources, error tracking, and frame rate limiting for {client_id}")
+            # Clean up parallel processing resources
+            if client_id in self.background_processors:
+                self.background_processors[client_id] = False  # Signal shutdown
+                
+            if client_id in self.frame_queues:
+                # Send shutdown signal to background processor
+                try:
+                    self.frame_queues[client_id].put_nowait(None)
+                except:
+                    pass
+                del self.frame_queues[client_id]
+                
+            if client_id in self.processing_locks:
+                del self.processing_locks[client_id]
+            
+            # Clean up previous frames cache
+            if hasattr(self, '_previous_frames') and client_id in self._previous_frames:
+                del self._previous_frames[client_id]
+            
+            logger.info(f"Cleaned up WebRTC resources, error tracking, frame rate limiting, and parallel processing for {client_id}")
             
         except Exception as e:
             logger.error(f"Error cleaning up WebRTC connection for {client_id}: {e}")
@@ -615,20 +806,33 @@ class WebRTCConnectionManager:
             return self.latest_processed_frame[latest_client]["frame"]
     
     def get_processing_stats(self) -> Dict[str, any]:
-        """Get performance statistics for frame processing"""
+        """Get performance statistics for frame processing including parallel processing metrics"""
         stats = {
             "target_fps": self.target_fps,
             "active_clients": len(self.latest_processed_frame),
+            "parallel_processing": {
+                "thread_pool_workers": self.thread_pool._max_workers,
+                "active_background_processors": sum(1 for active in self.background_processors.values() if active),
+                "queue_sizes": {client_id: queue.qsize() for client_id, queue in self.frame_queues.items()}
+            },
             "clients": {}
         }
         
         current_time = time.time()
         for client_id, frame_data in self.latest_processed_frame.items():
             time_since_last = current_time - frame_data["timestamp"]
+            
+            # Get queue status
+            queue_size = self.frame_queues.get(client_id, {}).qsize() if client_id in self.frame_queues else 0
+            is_processing = self.background_processors.get(client_id, False)
+            
             stats["clients"][client_id] = {
                 "last_processed": time_since_last,
                 "processing_time": frame_data["processing_time"],
-                "effective_fps": 1.0 / time_since_last if time_since_last > 0 else 0
+                "effective_fps": 1.0 / time_since_last if time_since_last > 0 else 0,
+                "queue_size": queue_size,
+                "parallel_processing_active": is_processing,
+                "processing_mode": "parallel" if is_processing else "sequential"
             }
         
         return stats

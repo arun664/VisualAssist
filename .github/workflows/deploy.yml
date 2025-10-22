@@ -35,12 +35,10 @@ jobs:
         
     - name: Verify Python project structure
       run: |
-        echo "🐍 Python AI Navigation Assistant Project"
-        echo "Backend requirements:"
-        cat backend/requirements.txt
-        echo ""
-        echo "Project structure:"
-        find . -name "*.py" | head -10
+        echo "🤖 AI Navigation Assistant - Production Deployment"
+        echo "Backend: Docker service (localhost:8000)"
+        echo "Frontend: GitHub Pages"
+        echo "Client: GitHub Pages"
         
     - name: Install Python dependencies for deployment
       run: |
@@ -83,6 +81,14 @@ jobs:
           </body>
         </html>
         EOF
+
+        # Copy configuration file to both frontend and client
+        echo "⚙️ Copying configuration files..."
+        if [ -f config.js ]; then
+          cp config.js dist/
+          cp config.js dist/client/
+          echo "Configuration files copied"
+        fi
 
         # Create .nojekyll file to disable Jekyll processing
         touch dist/.nojekyll
@@ -146,7 +152,7 @@ jobs:
         echo "- **Client Device:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/client/" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🔧 Setup Required:" >> $GITHUB_STEP_SUMMARY
-        echo "1. Run backend locally: \`cd backend && python main.py\`" >> $GITHUB_STEP_SUMMARY
+        echo "1. Run backend with Docker: \`docker-compose up -d backend\`" >> $GITHUB_STEP_SUMMARY
         echo "2. Backend will be available on http://localhost:8000" >> $GITHUB_STEP_SUMMARY
         echo "3. Open the live URLs above in your browser" >> $GITHUB_STEP_SUMMARY
-        echo "4. Follow the setup instructions on the main page" >> $GITHUB_STEP_SUMMARY
+        echo "4. Frontend and client automatically connect to local Docker backend" >> $GITHUB_STEP_SUMMARY

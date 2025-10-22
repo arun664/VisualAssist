@@ -36,32 +36,19 @@ class VisionProcessor:
     - Visual overlay rendering for safe path visualization
     """
     
-    def __init__(self, model_path: str = "yolov11n.pt", 
+    def __init__(self, model_name: str = "yolo11n.pt", 
                  stationary_threshold: float = 2.0,
                  confidence_threshold: float = 0.5):
         """
-        Initialize vision processor with YOLOv11 model and configuration
+        Initialize vision processor with pretrained YOLOv11 model from ultralytics
         
         Args:
-            model_path: Path to YOLOv11 model file (defaults to nano model)
+            model_name: Pretrained model name (yolo11n.pt, yolo11s.pt, yolo11m.pt, yolo11l.pt, yolo11x.pt)
             stationary_threshold: Motion magnitude threshold for stationary detection
             confidence_threshold: Minimum confidence for object detection
         """
-        import os
-        
-        # Handle model path - check multiple possible locations
-        possible_paths = [
-            model_path,  # As provided
-            os.path.join(os.path.dirname(__file__), model_path),  # Same directory as this file
-            os.path.join("backend", model_path),  # Backend subdirectory
-            os.path.join("..", "backend", model_path),  # Parent/backend directory
-        ]
-        
-        self.model_path = model_path  # Default
-        for path in possible_paths:
-            if os.path.exists(path):
-                self.model_path = path
-                break
+        # Use pretrained model from ultralytics - no local file needed
+        self.model_name = model_name
         
         self.stationary_threshold = stationary_threshold
         self.confidence_threshold = confidence_threshold
@@ -83,7 +70,7 @@ class VisionProcessor:
         self.grid_cols = 8
         self.safety_margin = 20  # pixels around obstacles
         
-        logger.info(f"VisionProcessor initialized with model: {model_path}")
+        logger.info(f"VisionProcessor initialized with pretrained model: {self.model_name}")
     
     def configure_thresholds(self, stationary_threshold: Optional[float] = None,
                            confidence_threshold: Optional[float] = None):
@@ -105,37 +92,49 @@ class VisionProcessor:
     
     def _initialize_yolo_model(self):
         """
-        Initialize YOLOv11 model loading and configuration with fallback handling
+        Initialize pretrained YOLOv11 model from ultralytics with automatic download
         Requirement 3.1: Initialize YOLOv11 model loading and configuration
         """
         try:
-            logger.info(f"Loading YOLOv11 model: {self.model_path}")
-            self.yolo_model = YOLO(self.model_path)
+            logger.info(f"Loading pretrained YOLOv11 model: {self.model_name}")
+            logger.info("Model will be automatically downloaded from ultralytics if not cached")
+            
+            # Load pretrained model - ultralytics will download automatically
+            self.yolo_model = YOLO(self.model_name)
             
             # Verify model loaded successfully
             if self.yolo_model is not None:
-                logger.info("YOLOv11 model loaded successfully")
+                logger.info("✅ YOLOv11 pretrained model loaded successfully")
                 # Log model information
-                logger.info(f"Model classes: {len(self.yolo_model.names)} classes")
-                logger.info(f"Model device: {self.yolo_model.device}")
+                logger.info(f"📊 Model classes: {len(self.yolo_model.names)} classes")
+                logger.info(f"🖥️ Model device: {self.yolo_model.device}")
+                logger.info(f"📦 Model name: {self.model_name}")
+                
+                # Log some example classes for navigation
+                example_classes = []
+                for class_id, class_name in list(self.yolo_model.names.items())[:10]:
+                    example_classes.append(f"{class_id}:{class_name}")
+                logger.info(f"🏷️ Example classes: {', '.join(example_classes)}")
                 
                 # Test model with dummy input to ensure it's working
                 test_frame = np.zeros((480, 640, 3), dtype=np.uint8)
                 test_results = self.yolo_model(test_frame, verbose=False)
-                logger.info("YOLOv11 model test inference successful")
+                logger.info("✅ YOLOv11 model test inference successful")
                 
             else:
-                raise RuntimeError("Failed to load YOLOv11 model")
+                raise RuntimeError("Failed to load YOLOv11 pretrained model")
                 
         except Exception as e:
-            logger.error(f"Error loading YOLOv11 model: {e}")
+            logger.error(f"❌ Error loading YOLOv11 pretrained model: {e}")
+            logger.error("💡 Make sure you have internet connection for model download")
+            logger.error("💡 Or check if ultralytics is properly installed: pip install ultralytics")
             self.yolo_model = None
             
             # Initialize fallback detection system
             self._initialize_fallback_detection()
             
             # Don't raise exception - allow system to continue with fallback
-            logger.warning("YOLOv11 model initialization failed - using fallback detection system")
+            logger.warning("⚠️ YOLOv11 model initialization failed - using fallback detection system")
     
     def _initialize_fallback_detection(self):
         """Initialize fallback object detection using basic computer vision techniques"""
@@ -720,11 +719,9 @@ class VisionProcessor:
 vision_processor: Optional[VisionProcessor] = None
 
 def get_vision_processor() -> VisionProcessor:
-    """Get or create global vision processor instance"""
+    """Get or create global vision processor instance with pretrained model"""
     global vision_processor
     if vision_processor is None:
-        import os
-        # Use absolute path to model file in backend directory
-        model_path = os.path.join(os.path.dirname(__file__), 'yolo11n.pt')
-        vision_processor = VisionProcessor(model_path=model_path)
+        # Use pretrained model from ultralytics - no local file needed
+        vision_processor = VisionProcessor(model_name="yolo11n.pt")
     return vision_processor
