@@ -22,7 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
     - name: Checkout code
@@ -47,146 +46,44 @@ jobs:
         python -m pip install --upgrade pip
         # No additional dependencies needed for static file serving
         
-    - name: Create Python-based deployment structure
+    - name: Create deployment structure (dist)
       run: |
-        echo "🐍 Creating Python HTTP server deployment structure..."
+        echo "Creating dist directory and copying site files..."
         mkdir -p dist
-        
-        # Copy frontend Python HTTP server files
-        echo "📁 Copying frontend files..."
-        cp -r frontend/* dist/
-        
-        # Copy client Python HTTP server files to client subdirectory  
-        echo "📱 Copying client files..."
-        mkdir -p dist/client
-        cp -r client/* dist/client/
-        
-        # Verify Python files are included
-        echo "🔍 Verifying deployment structure:"
-        find dist -name "*.py" -o -name "*.html" -o -name "*.js" -o -name "*.css" | head -20
-        
-        # Create index.html that redirects to frontend
+
+        # Copy the frontend site files into dist
+        if [ -d frontend ]; then
+          cp -r frontend/* dist/ || true
+        fi
+
+        # Copy client files under dist/client
+        if [ -d client ]; then
+          mkdir -p dist/client
+          cp -r client/* dist/client/ || true
+        fi
+
+        # Ensure frontend.html exists in dist (use frontend/index.html if present)
+        if [ -f frontend/index.html ]; then
+          cp frontend/index.html dist/frontend.html
+        fi
+
+        # Create a lightweight root index that links to frontend.html
         cat > dist/index.html << 'EOF'
-        <!DOCTYPE html>
+        <!doctype html>
         <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta http-equiv="refresh" content="0; url=./frontend.html">
+          <head>
+            <meta charset="utf-8" />
+            <meta http-equiv="refresh" content="0; url=./frontend.html" />
             <title>AI Navigation Assistant</title>
-        </head>
-        <body>
+          </head>
+          <body>
             <p>Redirecting to <a href="./frontend.html">AI Navigation Assistant</a>...</p>
-        </body>
+          </body>
         </html>
         EOF
-        
-        # Rename frontend index.html to frontend.html
-        mv dist/index.html dist/frontend.html
-        cp frontend/index.html dist/frontend.html
-        
-        # Create main index.html
-        cat > dist/index.html << 'EOF'
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>AI Navigation Assistant</title>
-            <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body {
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    min-height: 100vh;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 20px;
-                }
-                .container {
-                    text-align: center;
-                    background: rgba(255, 255, 255, 0.1);
-                    backdrop-filter: blur(10px);
-                    border-radius: 20px;
-                    padding: 40px;
-                    max-width: 600px;
-                }
-                h1 { font-size: 2.5em; margin-bottom: 20px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
-                p { font-size: 1.2em; margin-bottom: 30px; line-height: 1.6; }
-                .btn {
-                    display: inline-block;
-                    background: linear-gradient(45deg, #4CAF50, #45a049);
-                    color: white;
-                    text-decoration: none;
-                    padding: 15px 30px;
-                    border-radius: 25px;
-                    font-size: 16px;
-                    font-weight: 600;
-                    margin: 10px;
-                    transition: all 0.3s ease;
-                }
-                .btn:hover {
-                    transform: translateY(-2px);
-                    box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
-                }
-                .btn.secondary {
-                    background: linear-gradient(45deg, #2196F3, #1976D2);
-                }
-                .setup-info {
-                    background: rgba(255, 255, 255, 0.1);
-                    border-radius: 10px;
-                    padding: 20px;
-                    margin-top: 30px;
-                    text-align: left;
-                }
-                .setup-info h3 { color: #4CAF50; margin-bottom: 10px; }
-                .setup-info code {
-                    background: rgba(0, 0, 0, 0.3);
-                    padding: 2px 6px;
-                    border-radius: 4px;
-                    font-family: 'Courier New', monospace;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>🤖 AI Navigation Assistant</h1>
-                <p>Real-time AI-powered navigation assistance with object detection and path guidance.</p>
-                
-                <div>
-                    <a href="./frontend.html" class="btn">🖥️ Open Frontend Monitor</a>
-                    <a href="./client/" class="btn secondary">📱 Open Client Device</a>
-                </div>
-                
-                <div class="setup-info">
-                    <h3>🚀 Setup Instructions:</h3>
-                    <ol style="padding-left: 20px; line-height: 1.8;">
-                        <li><strong>Start Backend Locally:</strong><br>
-                            <code>cd backend && python main.py</code><br>
-                            Backend runs on <code>http://localhost:8000</code>
-                        </li>
-                        <li><strong>Open Client:</strong> Click "Open Client Device" above</li>
-                        <li><strong>Enable Permissions:</strong> Allow camera and microphone</li>
-                        <li><strong>Start Streaming:</strong> Click "Start Streaming" in client</li>
-                        <li><strong>Open Frontend:</strong> Click "Open Frontend Monitor" above</li>
-                        <li><strong>Activate Navigation:</strong> Click "Start Navigation" for audio guidance</li>
-                    </ol>
-                </div>
-                
-                <div class="setup-info">
-                    <h3>📋 Requirements:</h3>
-                    <ul style="padding-left: 20px; line-height: 1.8;">
-                        <li>Backend running locally on port 8000</li>
-                        <li>Modern browser with WebRTC support</li>
-                        <li>Camera and microphone permissions</li>
-                        <li>HTTPS connection (GitHub Pages provides this)</li>
-                    </ul>
-                </div>
-            </div>
-        </body>
-        </html>
-        EOF
+
+        echo "Deployment structure created. Files in dist:"
+        find dist -maxdepth 2 -type f | sed -n '1,40p'
         
     - name: Update client configuration for GitHub Pages
       run: |
@@ -221,18 +118,18 @@ jobs:
         
     - name: Setup Pages
       if: github.ref == 'refs/heads/main'
-      uses: actions/configure-pages@v3
+      uses: actions/configure-pages@v4
       
     - name: Upload artifact
       if: github.ref == 'refs/heads/main'
-      uses: actions/upload-pages-artifact@v2
+      uses: actions/upload-pages-artifact@v3
       with:
         path: ./dist
         
     - name: Deploy to GitHub Pages
       if: github.ref == 'refs/heads/main'
       id: deployment
-      uses: actions/deploy-pages@v2
+      uses: actions/deploy-pages@v4
         
     - name: Create deployment summary
       run: |
