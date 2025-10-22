@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  ai-navigation-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-navigation-backend:latest
+    container_name: ai-navigation-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - PYTHONPATH=/app
+      - YOLO_CONFIG_DIR=/app/models
+      - NUMBA_CACHE_DIR=/tmp/numba_cache
+    volumes:
+      # Optional: Mount logs directory for persistence
+      - ./logs:/app/logs
+      # Optional: Mount models directory for persistence
+      - ./models:/app/models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=10)"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 60s
+    networks:
+      - ai-navigation-network
+
+  # Optional: Simple version with minimal dependencies
+  ai-navigation-backend-simple:
+    build:
+      context: .
+      dockerfile: Dockerfile.simple
+    image: ai-navigation-backend:simple
+    container_name: ai-navigation-backend-simple
+    ports:
+      - "8001:8000"  # Different port to avoid conflicts
+    environment:
+      - ENVIRONMENT=production
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - PYTHONPATH=/app
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - ai-navigation-network
+    profiles:
+      - simple  # Only start with --profile simple
+
+networks:
+  ai-navigation-network:
+    driver: bridge
+
+# Optional: Add a reverse proxy for production
+# nginx:
+#   image: nginx:alpine
+#   container_name: ai-navigation-nginx
+#   ports:
+#     - "80:80"
+#     - "443:443"
+#   volumes:
+#     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+#     - ./ssl:/etc/nginx/ssl:ro
+#   depends_on:
+#     - ai-navigation-backend
+#   networks:
+#     - ai-navigation-network
+#   profiles:
+#     - production

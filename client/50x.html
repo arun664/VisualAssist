@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Error | AI Navigation Assistant</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            padding: 20px;
+        }
+        .error-container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+        }
+        h1 {
+            font-size: 4em;
+            margin: 0 0 20px 0;
+            color: #ff6b6b;
+        }
+        h2 {
+            font-size: 1.5em;
+            margin: 0 0 20px 0;
+            color: #ffffff;
+        }
+        p {
+            font-size: 1.1em;
+            margin: 0 0 30px 0;
+            color: #b3d9ff;
+            line-height: 1.6;
+        }
+        .btn {
+            display: inline-block;
+            background: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            transition: background 0.3s ease;
+            margin: 0 10px;
+        }
+        .btn:hover {
+            background: #45a049;
+        }
+        .btn-secondary {
+            background: #2196F3;
+        }
+        .btn-secondary:hover {
+            background: #1976D2;
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <h1>5xx</h1>
+        <h2>Server Error</h2>
+        <p>We're experiencing some technical difficulties. Please try again in a few moments.</p>
+        <a href="/" class="btn">← Back to Home</a>
+        <a href="javascript:location.reload()" class="btn btn-secondary">🔄 Retry</a>
+    </div>
+</body>
+</html>
