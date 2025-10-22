@@ -64,6 +64,8 @@ class NavigationClient {
         this.biometricEnabled = false;
         this.heartRateMonitor = null;
         this.clientId = this.generateClientId(); // Generate once and reuse
+        this.currentCameraFacing = 'user'; // 'user' for front camera, 'environment' for back camera
+        this.availableCameras = []; // Store available camera devices
         
         // Biometric sensor properties (placeholder for optional task 6.3)
         // this.availableSensors = {};
@@ -691,6 +693,13 @@ class NavigationClient {
     setupEventListeners() {
         // Media permission buttons
         document.getElementById('requestCameraBtn').addEventListener('click', () => this.requestCameraPermission());
+        
+        // Check if switch camera button exists before adding listener
+        const switchCameraBtn = document.getElementById('switchCameraBtn');
+        if (switchCameraBtn) {
+            switchCameraBtn.addEventListener('click', () => this.switchCamera());
+        }
+        
         document.getElementById('requestMicBtn').addEventListener('click', () => this.requestMicPermission());
         
         // Stream control buttons
@@ -705,7 +714,10 @@ class NavigationClient {
         document.getElementById('enableBiometricBtn').addEventListener('click', () => this.enableBiometrics());
         
         // WebRTC connectivity test button
-        document.getElementById('testWebRTCBtn').addEventListener('click', () => this.testWebRTCConnectivity());
+        const testWebRTCBtn = document.getElementById('testWebRTCBtn');
+        if (testWebRTCBtn) {
+            testWebRTCBtn.addEventListener('click', () => this.testWebRTCConnectivity());
+        }
         
         // Server URL input
         document.getElementById('serverUrl').addEventListener('input', (e) => {
@@ -727,7 +739,8 @@ class NavigationClient {
                 video: {
                     width: { ideal: 640 },
                     height: { ideal: 480 },
-                    frameRate: { ideal: 30 }
+                    frameRate: { ideal: 30 },
+                    facingMode: { ideal: this.currentCameraFacing }
                 }
             });
             
@@ -759,6 +772,14 @@ class NavigationClient {
             document.getElementById('cameraIndicator').className = 'status-indicator ready';
             document.getElementById('videoOverlay').classList.add('hidden');
             
+            // Enumerate cameras and enable switch button if multiple cameras available
+            await this.enumerateCameras();
+            
+            // Update switch button text
+            const switchBtn = document.getElementById('switchCameraBtn');
+            const cameraType = this.currentCameraFacing === 'user' ? 'Front' : 'Back';
+            switchBtn.innerHTML = `<span class="btn-icon">🔄</span> ${cameraType} Camera`;
+            
         } catch (error) {
             console.error('Camera permission error:', error);
             
@@ -783,6 +804,97 @@ class NavigationClient {
             this.updateCameraStatus('Error');
             document.getElementById('cameraIndicator').className = 'status-indicator error';
         }
+    }
+
+    async enumerateCameras() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            this.availableCameras = devices.filter(device => device.kind === 'videoinput');
+            
+            // Enable camera switch button if we have multiple cameras
+            const switchBtn = document.getElementById('switchCameraBtn');
+            if (this.availableCameras.length > 1) {
+                switchBtn.disabled = false;
+                console.log(`Found ${this.availableCameras.length} cameras:`, this.availableCameras);
+            } else {
+                switchBtn.disabled = true;
+                console.log('Only one camera available, switch disabled');
+            }
+            
+            return this.availableCameras;
+        } catch (error) {
+            console.error('Error enumerating cameras:', error);
+            return [];
+        }
+    }
+
+    async switchCamera() {
+        try {
+            // Toggle camera facing mode
+            this.currentCameraFacing = this.currentCameraFacing === 'user' ? 'environment' : 'user';
+            
+            // Stop current video stream
+            if (this.videoStream) {
+                this.videoStream.getTracks().forEach(track => track.stop());
+            }
+            
+            // Request new camera with switched facing mode
+            await this.requestCameraWithFacing(this.currentCameraFacing);
+            
+            // Update button text to show current camera
+            const switchBtn = document.getElementById('switchCameraBtn');
+            const cameraType = this.currentCameraFacing === 'user' ? 'Front' : 'Back';
+            switchBtn.innerHTML = `<span class="btn-icon">🔄</span> ${cameraType} Camera`;
+            
+            console.log(`Switched to ${cameraType.toLowerCase()} camera`);
+            
+        } catch (error) {
+            console.error('Error switching camera:', error);
+            this.showError('Failed to switch camera: ' + error.message);
+            
+            // Revert facing mode on error
+            this.currentCameraFacing = this.currentCameraFacing === 'user' ? 'environment' : 'user';
+        }
+    }
+
+    async requestCameraWithFacing(facingMode) {
+        // Update status
+        this.updateCameraStatus('Switching camera...');
+        
+        // Check if getUserMedia is supported
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('Camera access not supported in this browser');
+        }
+        
+        // Request camera access with specific facing mode
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                width: { ideal: 640 },
+                height: { ideal: 480 },
+                frameRate: { ideal: 30 },
+                facingMode: { ideal: facingMode }
+            }
+        });
+        
+        // Store video stream
+        this.videoStream = videoStream;
+        
+        // Update local video preview
+        const localVideo = document.getElementById('localVideo');
+        localVideo.srcObject = videoStream;
+        
+        // Monitor stream for track ending
+        videoStream.getVideoTracks().forEach(track => {
+            track.onended = () => {
+                console.log('Video track ended');
+                this.handleMediaStreamError('video');
+            };
+        });
+        
+        this.updateCameraStatus('Ready');
+        this.updateStreamButton();
+        document.getElementById('cameraIndicator').className = 'status-indicator ready';
+        document.getElementById('videoOverlay').classList.add('hidden');
     }
 
     async requestMicPermission() {

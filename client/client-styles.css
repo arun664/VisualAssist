@@ -214,6 +214,18 @@ h1 {
     box-shadow: 0 4px 15px rgba(33, 150, 243, 0.3);
 }
 
+.control-btn.camera-switch-btn {
+    background: linear-gradient(45deg, #9C27B0, #7B1FA2);
+    color: white;
+    box-shadow: 0 4px 15px rgba(156, 39, 176, 0.3);
+}
+
+.control-btn.camera-switch-btn:disabled {
+    background: linear-gradient(45deg, #9E9E9E, #757575);
+    box-shadow: 0 2px 5px rgba(158, 158, 158, 0.2);
+    cursor: not-allowed;
+}
+
 .control-btn.connect-btn {
     background: linear-gradient(45deg, #FF9800, #F57C00);
     color: white;
@@ -230,6 +242,12 @@ h1 {
     background: linear-gradient(45deg, #E91E63, #C2185B);
     color: white;
     box-shadow: 0 4px 15px rgba(233, 30, 99, 0.3);
+}
+
+.control-btn.test-btn {
+    background: linear-gradient(45deg, #673AB7, #512DA8);
+    color: white;
+    box-shadow: 0 4px 15px rgba(103, 58, 183, 0.3);
 }
 
 .control-btn:hover:not(:disabled) {
