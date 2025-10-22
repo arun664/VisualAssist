@@ -29,48 +29,6 @@
             </div>
         </div>
 
-        <!-- Mixed Content Warning -->
-        <div id="mixedContentWarning" class="mixed-content-warning hidden">
-            <div class="warning-content">
-                <h3>🔒 HTTPS Backend Required</h3>
-                <p>This page uses HTTPS, but the backend is HTTP only. Mobile browsers block this "Mixed Content."</p>
-                
-                <div class="warning-solutions">
-                    <h4>🛠️ Quick Solutions for Backend Admin:</h4>
-                    <div class="solution-option">
-                        <strong>1. ngrok (Fastest - 2 minutes)</strong>
-                        <code>ngrok http 8000</code>
-                        <small>Get instant HTTPS URL like https://abc123.ngrok.io</small>
-                    </div>
-                    
-                    <div class="solution-option">
-                        <strong>2. Cloudflare Tunnel (Best - Free)</strong>
-                        <code>cloudflared tunnel --url http://localhost:8000</code>
-                        <small>Get permanent HTTPS URL with custom domain</small>
-                    </div>
-                    
-                    <div class="solution-option">
-                        <strong>3. localtunnel (Free)</strong>
-                        <code>npx localtunnel --port 8000</code>
-                        <small>Get free HTTPS tunnel URL</small>
-                    </div>
-                </div>
-
-                <div class="warning-current-status">
-                    <h4>📱 Current Status:</h4>
-                    <p><strong>Desktop:</strong> May work with browser settings</p>
-                    <p><strong>Mobile:</strong> Will NOT work - HTTPS backend required</p>
-                </div>
-                
-                <div class="warning-buttons">
-                    <button id="openSetupGuideBtn" class="warning-btn info">Setup Guide</button>
-                    <button id="tryProxyBtn" class="warning-btn warning">Try CORS Proxy (Temporary)</button>
-                    <button id="dismissWarningBtn" class="warning-btn secondary">Dismiss</button>
-                    <button id="retryConnectionBtn" class="warning-btn primary">Retry Direct</button>
-                </div>
-            </div>
-        </div>
-
         <!-- Media Preview Section -->
         <div class="media-preview">
             <div class="video-container">
@@ -112,7 +70,6 @@
             <div class="server-config">
                 <label for="serverUrl">Backend Server URL:</label>
                 <input type="text" id="serverUrl" value="" placeholder="Backend URL will be auto-detected">
-                <p class="connection-note">🔒 <strong>HTTPS/HTTP Notice:</strong> If you see "Mixed Content" errors, this page (HTTPS) cannot connect to HTTP backend. Enable mixed content in your browser or use the HTTP version of this page.</p>
             </div>
             <div class="connection-controls">
                 <button id="connectBtn" class="control-btn connect-btn" disabled>
