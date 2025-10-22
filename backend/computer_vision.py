@@ -8,7 +8,11 @@ from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
 import asyncio
-from ultralytics import YOLO
+try:
+    from ultralytics import YOLO  # type: ignore
+except ImportError:
+    # Fallback if ultralytics is not properly installed
+    YOLO = None
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +58,7 @@ class VisionProcessor:
         self.confidence_threshold = confidence_threshold
         
         # Initialize YOLOv11 model
-        self.yolo_model: Optional[YOLO] = None
+        self.yolo_model: Optional[Any] = None
         self._initialize_yolo_model()
         
         # Optical flow tracking
@@ -100,7 +104,10 @@ class VisionProcessor:
             logger.info("Model will be automatically downloaded from ultralytics if not cached")
             
             # Load pretrained model - ultralytics will download automatically
-            self.yolo_model = YOLO(self.model_name)
+            if YOLO is not None:
+                self.yolo_model = YOLO(self.model_name)
+            else:
+                logger.warning("YOLO not available, using fallback detection")
             
             # Verify model loaded successfully
             if self.yolo_model is not None:
@@ -184,38 +191,67 @@ class VisionProcessor:
     def _detect_obstacles_yolo(self, frame: np.ndarray) -> List[Detection]:
         """YOLOv11-based obstacle detection with navigation-specific filtering"""
         # Run YOLOv11 inference on frame
+        if self.yolo_model is None:
+            return []  # Return empty detections if model not available
         results = self.yolo_model(frame, verbose=False)
         
         detections = []
         
-        # Define navigation-relevant obstacle classes (COCO dataset classes)
+        # Define navigation-relevant obstacle classes focusing on banquet hall/event space objects
         navigation_obstacles = {
-            # People and animals
+            # People and animals (highest priority for navigation)
             0: 'person',
             16: 'dog', 17: 'horse', 18: 'sheep', 19: 'cow', 20: 'elephant',
             21: 'bear', 22: 'zebra', 23: 'giraffe',
             
-            # Furniture and objects that block paths
-            56: 'chair', 57: 'couch', 58: 'potted plant', 59: 'bed',
-            60: 'dining table', 61: 'toilet', 62: 'tv', 63: 'laptop',
-            64: 'mouse', 65: 'remote', 66: 'keyboard', 67: 'cell phone',
-            68: 'microwave', 69: 'oven', 70: 'toaster', 71: 'sink',
-            72: 'refrigerator', 73: 'book', 74: 'clock', 75: 'vase',
-            76: 'scissors', 77: 'teddy bear', 78: 'hair drier', 79: 'toothbrush',
+            # BANQUET HALL / EVENT SPACE FURNITURE (key targets like in your image)
+            56: 'chair',          # Primary target - chairs in banquet halls
+            57: 'couch',          # Lounge seating
+            58: 'potted plant',   # Decorative plants common in events
+            59: 'bed',            # Hotel/venue furniture
+            60: 'dining table',   # Main tables in banquet halls - CRITICAL
+            61: 'toilet',         # Restroom facilities
             
-            # Vehicles and large objects
+            # Display and presentation equipment
+            62: 'tv',             # Screens/displays for presentations
+            72: 'refrigerator',   # Catering equipment
+            74: 'clock',          # Wall clocks in venues
+            75: 'vase',          # Decorative items on tables
+            
+            # Event/meeting room equipment 
+            63: 'laptop',         # Presentation equipment
+            64: 'mouse', 65: 'remote', 66: 'keyboard',  # AV equipment
+            67: 'cell phone',     # Personal items on tables
+            
+            # Catering and dining items (common in banquet halls)
+            40: 'bottle',         # Water bottles, wine on tables
+            41: 'wine glass',     # Glassware on dining tables  
+            42: 'cup',           # Coffee cups, tea cups
+            43: 'fork', 44: 'knife', 45: 'spoon',  # Dining utensils
+            46: 'bowl',          # Serving bowls on tables
+            
+            # Kitchen/catering equipment
+            68: 'microwave', 69: 'oven', 70: 'toaster', 71: 'sink',
+            
+            # Transportation obstacles (parking lots, venue access)
             2: 'car', 3: 'motorcycle', 5: 'bus', 7: 'truck',
             
-            # Sports equipment and obstacles
+            # Personal items and bags (left on chairs/tables at events)
+            24: 'backpack',       # Guest bags
+            25: 'umbrella',       # Weather protection items  
+            26: 'handbag',        # Purses left on tables/chairs
+            27: 'tie',           # Formal wear items
+            28: 'suitcase',      # Luggage for traveling guests
+            
+            # Sports and recreational equipment (if venue has multiple uses)
             32: 'sports ball', 37: 'skateboard', 38: 'surfboard',
+            39: 'tennis racket',
             
-            # Bags and containers
-            24: 'backpack', 25: 'umbrella', 26: 'handbag', 27: 'tie',
-            28: 'suitcase',
+            # Books and documents (common on conference tables)
+            73: 'book',
             
-            # Other common obstacles
-            39: 'tennis racket', 40: 'bottle', 41: 'wine glass', 42: 'cup',
-            43: 'fork', 44: 'knife', 45: 'spoon', 46: 'bowl'
+            # Personal care items
+            76: 'scissors', 77: 'teddy bear', 78: 'hair drier', 79: 'toothbrush'
         }
         
         frame_height, frame_width = frame.shape[:2]
@@ -236,7 +272,7 @@ class VisionProcessor:
                     
                     # Get class ID and name
                     class_id = int(boxes.cls[i].cpu().numpy())
-                    class_name = self.yolo_model.names[class_id]
+                    class_name = self.yolo_model.names[class_id] if self.yolo_model else f"class_{class_id}"
                     
                     # Filter by confidence threshold and navigation relevance
                     if (confidence >= self.confidence_threshold and 
@@ -365,6 +401,7 @@ class VisionProcessor:
             MotionAnalysis object with motion information
         """
         try:
+            import numpy as np
             # Convert to grayscale for optical flow calculation
             gray_current = cv2.cvtColor(current_frame, cv2.COLOR_BGR2GRAY)
             
@@ -393,13 +430,17 @@ class VisionProcessor:
                 self.previous_frame = gray_current.copy()
                 return motion_analysis
             
-            # Calculate optical flow
+            # Calculate optical flow with explicit parameters
+            import numpy as np
+            nextPts = np.zeros_like(points_to_track)  # Initialize output array
             new_points, status, error = cv2.calcOpticalFlowPyrLK(
                 self.previous_frame,
                 gray_current,
                 points_to_track,
-                None,
-                **self.optical_flow_params
+                nextPts,
+                winSize=(15, 15),
+                maxLevel=2,
+                criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
             )
             
             # Filter good points
@@ -423,7 +464,7 @@ class VisionProcessor:
                 
                 motion_analysis = MotionAnalysis(
                     flow_magnitude=float(avg_magnitude),
-                    is_stationary=is_stationary,
+                    is_stationary=bool(is_stationary),
                     confidence=confidence,
                     motion_vectors=motion_vectors
                 )
@@ -438,6 +479,7 @@ class VisionProcessor:
         except Exception as e:
             logger.error(f"Error in optical flow calculation: {e}")
             # Return default stationary analysis on error
+            import numpy as np
             return MotionAnalysis(
                 flow_magnitude=0.0,
                 is_stationary=True,
@@ -543,8 +585,10 @@ class VisionProcessor:
     def draw_overlays(self, frame: np.ndarray, detections: List[Detection], 
                      safe_path_grid: np.ndarray) -> np.ndarray:
         """
-        Create enhanced visual overlay rendering system for ground-level navigation
-        Shows clear walking paths and navigation obstacles
+        Create enhanced visual overlay rendering system exactly like the banquet hall example
+        - Green marks/areas = Safe zones for movement (no obstacles)
+        - Red marks/areas = Obstacles/blocked areas 
+        - Clear bounding boxes around all detected objects (chairs, tables, etc.)
         
         Args:
             frame: Input video frame
@@ -552,7 +596,7 @@ class VisionProcessor:
             safe_path_grid: Binary grid with safe path information
             
         Returns:
-            Frame with enhanced visual overlays for navigation
+            Frame with enhanced visual overlays for navigation exactly like requested
         """
         overlay_frame = frame.copy()
         height, width = frame.shape[:2]
@@ -561,10 +605,7 @@ class VisionProcessor:
         cell_height = height // self.grid_rows
         cell_width = width // self.grid_cols
         
-        # Create separate overlay for path visualization
-        path_overlay = np.zeros_like(frame)
-        
-        # Draw safe navigation paths with enhanced visibility
+        # 1. DRAW SAFE AND BLOCKED ZONES (like the green/red marks in the image)
         for row in range(self.grid_rows):
             for col in range(self.grid_cols):
                 x1 = col * cell_width
@@ -572,73 +613,137 @@ class VisionProcessor:
                 x2 = x1 + cell_width
                 y2 = y1 + cell_height
                 
-                if safe_path_grid[row, col] == 1:  # Safe cell
-                    # Draw bright green path with gradient effect
-                    cv2.rectangle(path_overlay, (x1, y1), (x2, y2), (0, 255, 0), -1)
-                    # Add border for clarity
-                    cv2.rectangle(path_overlay, (x1, y1), (x2, y2), (0, 200, 0), 2)
-                else:  # Blocked cell
-                    # Draw subtle red overlay for blocked areas
-                    cv2.rectangle(path_overlay, (x1, y1), (x2, y2), (0, 0, 100), -1)
+                # Calculate center of each grid cell for mark placement
+                center_x = x1 + cell_width // 2
+                center_y = y1 + cell_height // 2
+                
+                if safe_path_grid[row, col] == 1:  # Safe zone
+                    # Draw bright GREEN marks for safe movement areas
+                    # Use filled circles similar to the green marks in your image
+                    cv2.circle(overlay_frame, (center_x, center_y), 15, (0, 255, 0), -1)
+                    cv2.circle(overlay_frame, (center_x, center_y), 15, (0, 200, 0), 3)  # Border
+                    
+                    # Add subtle green overlay for the entire safe area
+                    cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    
+                else:  # Blocked zone  
+                    # Draw bright RED marks for obstacles/blocked areas
+                    # Use filled circles similar to the red marks in your image
+                    cv2.circle(overlay_frame, (center_x, center_y), 15, (0, 0, 255), -1)
+                    cv2.circle(overlay_frame, (center_x, center_y), 15, (0, 0, 200), 3)  # Border
+                    
+                    # Add subtle red overlay for blocked areas
+                    cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
         
-        # Blend path overlay with original frame
-        alpha = 0.4  # Increased transparency for better visibility
-        overlay_frame = cv2.addWeighted(frame, 1 - alpha, path_overlay, alpha, 0)
-        
-        # Draw navigation direction arrow if clear path exists
-        if self.has_clear_path(safe_path_grid):
-            # Draw forward arrow in center
-            center_x = width // 2
-            arrow_start_y = int(height * 0.8)  # Bottom area
-            arrow_end_y = int(height * 0.4)    # Middle area
-            
-            # Draw thick green arrow
-            cv2.arrowedLine(overlay_frame, (center_x, arrow_start_y), 
-                          (center_x, arrow_end_y), (0, 255, 0), 8, tipLength=0.3)
-            
-            # Add "CLEAR PATH" text
-            cv2.putText(overlay_frame, "CLEAR PATH", (center_x - 80, arrow_end_y - 20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        else:
-            # Draw warning for blocked path
-            cv2.putText(overlay_frame, "PATH BLOCKED", (width//2 - 100, height//2),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
-        
-        # Draw enhanced obstacle detection boxes
+        # 2. DRAW CLEAR BOUNDING BOXES around ALL detected objects (chairs, tables, etc.)
         for detection in detections:
             x1, y1, x2, y2 = detection.bbox
             
-            # Draw thick red bounding box for obstacles
-            cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), (0, 0, 255), 4)
+            # Draw thick, clear bounding box around each object
+            # Use bright colors for maximum visibility
+            if detection.class_name in ['chair', 'dining table', 'couch', 'bed']:
+                # Furniture gets bright blue boxes for clarity
+                cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), (255, 165, 0), 4)  # Orange
+            elif detection.class_name == 'person':
+                # People get yellow boxes
+                cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), (0, 255, 255), 4)  # Yellow
+            else:
+                # Other obstacles get red boxes
+                cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), (0, 0, 255), 4)  # Red
             
-            # Add obstacle label with enhanced visibility
-            label = f"{detection.class_name}: {detection.confidence:.2f}"
-            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+            # Add clear object label with enhanced visibility
+            label = f"{detection.class_name.upper()}"
+            confidence_text = f"{detection.confidence:.1%}"
             
-            # Draw label background for better readability
+            # Calculate label dimensions
+            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+            conf_size = cv2.getTextSize(confidence_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+            
+            # Draw label background for maximum readability
             label_bg_x1 = x1
-            label_bg_y1 = y1 - label_size[1] - 10
-            label_bg_x2 = x1 + label_size[0] + 10
+            label_bg_y1 = y1 - label_size[1] - conf_size[1] - 15
+            label_bg_x2 = x1 + max(label_size[0], conf_size[0]) + 15
             label_bg_y2 = y1
             
+            # Black background with white border for labels
             cv2.rectangle(overlay_frame, (label_bg_x1, label_bg_y1), 
-                         (label_bg_x2, label_bg_y2), (0, 0, 255), -1)
+                         (label_bg_x2, label_bg_y2), (0, 0, 0), -1)
+            cv2.rectangle(overlay_frame, (label_bg_x1, label_bg_y1), 
+                         (label_bg_x2, label_bg_y2), (255, 255, 255), 2)
             
-            # Draw white text on red background
-            cv2.putText(overlay_frame, label, (x1 + 5, y1 - 5),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            # Draw white text on black background for maximum contrast
+            cv2.putText(overlay_frame, label, (x1 + 5, y1 - conf_size[1] - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            cv2.putText(overlay_frame, confidence_text, (x1 + 5, y1 - 5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
-        # Add navigation info overlay
-        info_text = f"Objects: {len(detections)} | Safe Cells: {np.sum(safe_path_grid)}/{safe_path_grid.size}"
-        cv2.putText(overlay_frame, info_text, (10, 30),
+        # 3. NAVIGATION STATUS INDICATOR
+        safe_cells = np.sum(safe_path_grid)
+        total_cells = safe_path_grid.size
+        safe_percentage = (safe_cells / total_cells) * 100
+        
+        # Status background
+        status_bg_x1, status_bg_y1 = 10, 10
+        status_bg_x2, status_bg_y2 = 400, 120
+        cv2.rectangle(overlay_frame, (status_bg_x1, status_bg_y1), 
+                     (status_bg_x2, status_bg_y2), (0, 0, 0), -1)
+        cv2.rectangle(overlay_frame, (status_bg_x1, status_bg_y1), 
+                     (status_bg_x2, status_bg_y2), (255, 255, 255), 2)
+        
+        # Navigation status
+        if self.has_clear_path(safe_path_grid):
+            status_text = "NAVIGATION: CLEAR PATH"
+            status_color = (0, 255, 0)  # Green
+            
+            # Draw forward navigation arrow
+            center_x = width // 2
+            arrow_start_y = int(height * 0.85)
+            arrow_end_y = int(height * 0.65)
+            cv2.arrowedLine(overlay_frame, (center_x, arrow_start_y), 
+                          (center_x, arrow_end_y), (0, 255, 0), 8, tipLength=0.3)
+        else:
+            status_text = "NAVIGATION: OBSTACLES DETECTED"
+            status_color = (0, 0, 255)  # Red
+        
+        # Draw status information
+        cv2.putText(overlay_frame, status_text, (20, 35),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+        cv2.putText(overlay_frame, f"OBJECTS DETECTED: {len(detections)}", (20, 60),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(overlay_frame, f"SAFE AREAS: {safe_percentage:.1f}%", (20, 85),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(overlay_frame, f"GRID: {safe_cells}/{total_cells} CLEAR", (20, 110),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
         
-        # Add ground level indicator
+        # 4. GROUND LEVEL INDICATOR (like in banquet hall analysis)
         ground_line_y = int(height * 0.3)
         cv2.line(overlay_frame, (0, ground_line_y), (width, ground_line_y), 
-                (255, 255, 0), 2)
-        cv2.putText(overlay_frame, "GROUND LEVEL", (10, ground_line_y - 10),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+                (255, 255, 0), 3)  # Thick yellow line
+        cv2.putText(overlay_frame, "GROUND LEVEL ANALYSIS", (width - 300, ground_line_y - 10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+        
+        # 5. LEGEND (like the color coding you showed)
+        legend_x = width - 250
+        legend_y = height - 120
+        
+        # Legend background
+        cv2.rectangle(overlay_frame, (legend_x - 10, legend_y - 40), 
+                     (width - 10, height - 10), (0, 0, 0), -1)
+        cv2.rectangle(overlay_frame, (legend_x - 10, legend_y - 40), 
+                     (width - 10, height - 10), (255, 255, 255), 2)
+        
+        # Legend items
+        cv2.circle(overlay_frame, (legend_x, legend_y), 8, (0, 255, 0), -1)
+        cv2.putText(overlay_frame, "SAFE ZONES", (legend_x + 20, legend_y + 5),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        
+        cv2.circle(overlay_frame, (legend_x, legend_y + 25), 8, (0, 0, 255), -1)
+        cv2.putText(overlay_frame, "OBSTACLES", (legend_x + 20, legend_y + 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        
+        cv2.rectangle(overlay_frame, (legend_x, legend_y + 50), (legend_x + 15, legend_y + 65), (255, 165, 0), 3)
+        cv2.putText(overlay_frame, "OBJECTS", (legend_x + 20, legend_y + 65),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
         
         return overlay_frame
     

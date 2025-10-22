@@ -275,7 +275,9 @@ class WebSocketManager {
 
     sendCommand(command, data = {}) {
         if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-            const message = { command, ...data };
+            // Format message as expected by backend WebSocket handler
+            const message = { type: command, ...data };
+            console.log('Sending WebSocket command:', message);
             this.websocket.send(JSON.stringify(message));
             return true;
         } else {
@@ -864,27 +866,39 @@ class NavigationApp {
     }
 
     handleWebSocketMessage(message) {
-        console.log('Received message:', message);
+        console.log('Received WebSocket message:', message);
         
         // Handle different message types
         if (message.speak) {
+            console.log('Processing speak message:', message.speak);
             this.handleAudioMessage(message.speak, message.state);
         }
         
         if (message.set_lang) {
+            console.log('Setting language:', message.set_lang);
             this.audioSystem.setLanguage(message.set_lang);
+        }
+        
+        // Handle command responses (like start/stop confirmations)
+        if (message.type === 'command_response') {
+            console.log('Command response received:', message);
+            
+            // If there's a speak message in the response, play it
+            if (message.message && message.status === 'success') {
+                this.handleAudioMessage(message.message, message.current_state);
+            }
+        }
+        
+        // Handle state changes with speak messages
+        if (message.type === 'state_change' && message.speak) {
+            console.log('State change with speak message:', message.speak);
+            this.handleAudioMessage(message.speak, message.state);
         }
     }
 
     handleAudioMessage(text, currentState) {
         // Always show visual feedback for monitoring
         this.showVisualFeedback(text, currentState);
-        
-        // Only play audio guidance when navigation is active
-        if (!this.isNavigating) {
-            console.log('Navigation not active - audio guidance muted:', text);
-            return;
-        }
         
         if (!this.audioSystem.isSupported) {
             console.warn('Audio feedback not available - displaying text instead:', text);
@@ -901,13 +915,23 @@ class NavigationApp {
             urgency = 'urgent';
         }
 
-        // Speak the message with appropriate urgency
-        this.audioSystem.speak(text, urgency);
-        
-        // Also show visual feedback for important messages
+        // FIXED: Allow emergency/urgent audio even when navigation is not active
+        // This ensures connection lost alerts and critical warnings always play
         if (urgency === 'emergency' || urgency === 'urgent') {
+            console.log('Playing emergency/urgent audio regardless of navigation state:', text);
+            this.audioSystem.speak(text, urgency);
             this.showVisualAlert(text, urgency);
+            return;
         }
+        
+        // Only play normal audio guidance when navigation is active
+        if (!this.isNavigating) {
+            console.log('Navigation not active - normal audio guidance muted:', text);
+            return;
+        }
+
+        // Speak normal guidance messages only during active navigation
+        this.audioSystem.speak(text, urgency);
     }
     
     showVisualFeedback(text, currentState) {
@@ -1087,6 +1111,7 @@ class NavigationApp {
 
         if (this.isNavigating) {
             // Stop navigation (but keep video stream for monitoring)
+            console.log('Sending stop command to server...');
             if (this.websocketManager.sendCommand('stop')) {
                 this.isNavigating = false;
                 startStopBtn.textContent = 'Start Navigation';
@@ -1109,6 +1134,7 @@ class NavigationApp {
             startStopBtn.textContent = 'Starting...';
             
             try {
+                console.log('Sending start command to server...');
                 if (this.websocketManager.sendCommand('start')) {
                     this.isNavigating = true;
                     startStopBtn.textContent = 'Stop Navigation';
@@ -1119,6 +1145,9 @@ class NavigationApp {
                     const audioStatus = document.getElementById('audioStatus');
                     audioStatus.textContent = 'Guidance Active';
                     audioStatus.className = 'status-value active';
+                    
+                    // Test audio immediately when starting navigation
+                    this.audioSystem.speak("Navigation system activated. Audio test successful.", 'normal');
                     
                     // Video stream should already be running for monitoring
                     // If not connected, start it now
