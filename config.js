@@ -4,8 +4,18 @@
 const CONFIG = {
   // Backend URL configuration
   getBackendUrl: () => {
-    // Use ngrok HTTPS tunnel URL
-    return 'https://flagless-clinographic-janita.ngrok-free.dev';
+    // Detect if running locally
+    const isLocalhost = window.location.hostname === 'localhost' || 
+                       window.location.hostname === '127.0.0.1' ||
+                       window.location.hostname.includes('localhost');
+    
+    if (isLocalhost) {
+      // Use local backend when running on localhost
+      return 'http://localhost:8000';
+    } else {
+      // Use ngrok HTTPS tunnel URL for production
+      return 'https://flagless-clinographic-janita.ngrok-free.dev';
+    }
   },
   
   // Get CORS proxy URL as temporary workaround (NOT for production)
