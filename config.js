@@ -4,27 +4,15 @@
 const CONFIG = {
   // Backend URL configuration
   getBackendUrl: () => {
-    // Check if we're on HTTPS (GitHub Pages)
-    if (window.location.protocol === 'https:') {
-      // TODO: Replace with your HTTPS tunnel URL once set up
-      // For now, we'll try the HTTP URL and handle the error gracefully
-      // 
-      // Options to set up HTTPS backend:
-      // 1. Cloudflare Tunnel: https://your-domain.com
-      // 2. ngrok: https://abc123.ngrok.io  
-      // 3. localtunnel: https://your-subdomain.loca.lt
-      
-      // Temporary: Return HTTP URL and let error handling guide users
-      return 'http://18.222.141.234:8000';
-    }
-    return 'http://18.222.141.234:8000';
+    // Use ngrok HTTPS tunnel URL
+    return 'https://flagless-clinographic-janita.ngrok-free.dev';
   },
   
   // Get CORS proxy URL as temporary workaround (NOT for production)
   getCorsProxyUrl: () => {
     // TEMPORARY WORKAROUND: Use public CORS proxy
     // WARNING: Only for testing - not secure for production!
-    return 'https://cors-anywhere.herokuapp.com/http://18.222.141.234:8000';
+    return 'https://cors-anywhere.herokuapp.com/https://flagless-clinographic-janita.ngrok-free.dev';
   },
   
   // Get suggested HTTPS solutions
@@ -50,7 +38,7 @@ const CONFIG = {
   
   // Get direct backend URL without proxy
   getDirectBackendUrl: () => {
-    return 'http://18.222.141.234:8000';
+    return 'https://flagless-clinographic-janita.ngrok-free.dev';
   },
   
   // Check if current page is HTTPS
