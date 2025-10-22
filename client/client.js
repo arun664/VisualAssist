@@ -154,6 +154,8 @@ class NavigationClient {
     setupMixedContentWarning() {
         const dismissBtn = document.getElementById('dismissWarningBtn');
         const retryBtn = document.getElementById('retryConnectionBtn');
+        const proxyBtn = document.getElementById('tryProxyBtn');
+        const setupGuideBtn = document.getElementById('openSetupGuideBtn');
         
         if (dismissBtn) {
             dismissBtn.addEventListener('click', () => {
@@ -164,8 +166,23 @@ class NavigationClient {
         if (retryBtn) {
             retryBtn.addEventListener('click', () => {
                 this.hideMixedContentWarning();
-                // Try to connect again
+                // Try to connect again with direct URL
                 this.connectToServer();
+            });
+        }
+        
+        if (proxyBtn) {
+            proxyBtn.addEventListener('click', () => {
+                this.hideMixedContentWarning();
+                // Try to connect using CORS proxy (temporary workaround)
+                this.connectToServerWithProxy();
+            });
+        }
+        
+        if (setupGuideBtn) {
+            setupGuideBtn.addEventListener('click', () => {
+                // Open setup guide in new tab
+                window.open('https://github.com/arun664/VisualAssist/blob/main/HTTPS_BACKEND_SETUP.md', '_blank');
             });
         }
     }
@@ -999,6 +1016,62 @@ class NavigationClient {
                 this.showError('Failed to connect to server: ' + error.message);
             }
             this.updateConnectionStatus('Connection failed');
+            document.getElementById('connectionIndicator').className = 'status-indicator error';
+            this.updateConnectButtonState();
+        }
+    }
+
+    async connectToServerWithProxy() {
+        this.updateConnectionStatus('Connecting via CORS proxy...');
+        document.getElementById('connectionIndicator').className = 'status-indicator connecting';
+        
+        try {
+            const proxyUrl = window.AI_NAV_CONFIG.getCorsProxyUrl();
+            console.log('Attempting proxy connection to:', proxyUrl);
+            
+            // Test connection with proxy
+            const testUrl = proxyUrl + '/health';
+            
+            // Show warning about proxy usage
+            this.showError('⚠️ Using temporary CORS proxy. Backend should set up HTTPS tunnel for production.');
+            
+            // Create a timeout promise
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Proxy connection timeout')), 10000);
+            });
+            
+            // Race between fetch and timeout (longer timeout for proxy)
+            const response = await Promise.race([
+                fetch(testUrl, { method: 'GET' }),
+                timeoutPromise
+            ]);
+            
+            if (!response.ok) {
+                throw new Error(`Proxy server not responding (${response.status})`);
+            }
+            
+            const healthData = await response.json();
+            
+            // Update backend URL to use proxy
+            this.backendUrl = proxyUrl;
+            this.isUsingProxy = true;
+            
+            this.updateConnectionStatus('Connected via CORS proxy');
+            document.getElementById('connectionIndicator').className = 'status-indicator connected';
+            
+            this.updateConnectionStatus(`Connected via proxy to ${healthData.service || 'AI Navigation Service'}`);
+            this.updateConnectButtonState();
+            
+        } catch (error) {
+            console.error('Proxy connection failed:', error);
+            
+            if (error.message.includes('cors-anywhere')) {
+                this.showError('CORS proxy temporarily unavailable. Backend admin should set up HTTPS tunnel.');
+            } else {
+                this.showError('Proxy connection failed: ' + error.message);
+            }
+            
+            this.updateConnectionStatus('Proxy connection failed');
             document.getElementById('connectionIndicator').className = 'status-indicator error';
             this.updateConnectButtonState();
         }

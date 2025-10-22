@@ -4,23 +4,63 @@
 const CONFIG = {
   // Backend URL configuration
   getBackendUrl: () => {
-    // Check if we're on HTTPS (GitHub Pages) and need to handle Mixed Content
+    // Check if we're on HTTPS (GitHub Pages)
     if (window.location.protocol === 'https:') {
-      // For HTTPS pages, we need to use a proxy or different approach
-      // For now, return HTTP but handle Mixed Content in client
+      // TODO: Replace with your HTTPS tunnel URL once set up
+      // For now, we'll try the HTTP URL and handle the error gracefully
+      // 
+      // Options to set up HTTPS backend:
+      // 1. Cloudflare Tunnel: https://your-domain.com
+      // 2. ngrok: https://abc123.ngrok.io  
+      // 3. localtunnel: https://your-subdomain.loca.lt
+      
+      // Temporary: Return HTTP URL and let error handling guide users
       return 'http://18.222.141.234:8000';
     }
     return 'http://18.222.141.234:8000';
   },
   
-  // Get HTTP URL specifically for mixed content handling
-  getHttpBackendUrl: () => {
+  // Get CORS proxy URL as temporary workaround (NOT for production)
+  getCorsProxyUrl: () => {
+    // TEMPORARY WORKAROUND: Use public CORS proxy
+    // WARNING: Only for testing - not secure for production!
+    return 'https://cors-anywhere.herokuapp.com/http://18.222.141.234:8000';
+  },
+  
+  // Get suggested HTTPS solutions
+  getHttpsSolutions: () => {
+    return [
+      {
+        name: 'Cloudflare Tunnel (Recommended)',
+        description: 'Free, reliable, custom domain',
+        setup: 'Install cloudflared on AWS, create tunnel, get HTTPS URL'
+      },
+      {
+        name: 'ngrok',
+        description: 'Quick setup, temporary URLs',
+        setup: 'Run "ngrok http 8000" on AWS, get https://xxx.ngrok.io'
+      },
+      {
+        name: 'localtunnel',
+        description: 'Free, custom subdomain',
+        setup: 'Run "lt --port 8000 --subdomain visualassist" on AWS'
+      }
+    ];
+  },
+  
+  // Get direct backend URL without proxy
+  getDirectBackendUrl: () => {
     return 'http://18.222.141.234:8000';
   },
   
   // Check if current page is HTTPS
   isHttpsPage: () => {
     return window.location.protocol === 'https:';
+  },
+  
+  // Check if we have Mixed Content issue
+  hasMixedContentIssue: () => {
+    return CONFIG.isHttpsPage() && CONFIG.getBackendUrl().startsWith('http://');
   },
   
   // WebSocket URL (derived from backend URL)
@@ -52,3 +92,4 @@ console.log('Environment:', CONFIG.isDevelopment() ? 'Development' : 'Production
 console.log('Backend URL:', CONFIG.getBackendUrl());
 console.log('WebSocket URL:', CONFIG.getWebSocketUrl());
 console.log('Is HTTPS Page:', CONFIG.isHttpsPage());
+console.log('Mixed Content Issue:', CONFIG.hasMixedContentIssue());
