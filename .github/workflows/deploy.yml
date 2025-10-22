@@ -6,9 +6,23 @@ on:
   pull_request:
     branches: [ main ]
 
+# Set permissions for GitHub token
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
     - name: Checkout code
@@ -28,16 +42,28 @@ jobs:
         echo "Project structure:"
         find . -name "*.py" | head -10
         
-    - name: Create deployment structure
+    - name: Install Python dependencies for deployment
       run: |
+        python -m pip install --upgrade pip
+        # No additional dependencies needed for static file serving
+        
+    - name: Create Python-based deployment structure
+      run: |
+        echo "🐍 Creating Python HTTP server deployment structure..."
         mkdir -p dist
         
-        # Copy frontend files
+        # Copy frontend Python HTTP server files
+        echo "📁 Copying frontend files..."
         cp -r frontend/* dist/
         
-        # Copy client files to client subdirectory
+        # Copy client Python HTTP server files to client subdirectory  
+        echo "📱 Copying client files..."
         mkdir -p dist/client
         cp -r client/* dist/client/
+        
+        # Verify Python files are included
+        echo "🔍 Verifying deployment structure:"
+        find dist -name "*.py" -o -name "*.html" -o -name "*.js" -o -name "*.css" | head -20
         
         # Create index.html that redirects to frontend
         cat > dist/index.html << 'EOF'
@@ -193,12 +219,20 @@ jobs:
         </div>
         EOF
         
-    - name: Deploy to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v3
+    - name: Setup Pages
       if: github.ref == 'refs/heads/main'
+      uses: actions/configure-pages@v3
+      
+    - name: Upload artifact
+      if: github.ref == 'refs/heads/main'
+      uses: actions/upload-pages-artifact@v2
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./dist
+        path: ./dist
+        
+    - name: Deploy to GitHub Pages
+      if: github.ref == 'refs/heads/main'
+      id: deployment
+      uses: actions/deploy-pages@v2
         
     - name: Create deployment summary
       run: |
