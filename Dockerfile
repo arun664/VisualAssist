@@ -52,12 +52,6 @@ RUN mkdir -p /app/backend/logs /app/backend/models /var/log/nginx /var/lib/nginx
 
 # Configure Nginx for serving frontend and proxying backend
 COPY docker/nginx.conf /etc/nginx/nginx.conf
-COPY docker/default.conf /etc/nginx/sites-available/default
-
-# Create nginx configuration
-RUN mkdir -p /etc/nginx/sites-enabled && \
-    ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default && \
-    rm -f /etc/nginx/sites-enabled/default
 
 # Set environment variables
 ENV PYTHONPATH=/app/backend
