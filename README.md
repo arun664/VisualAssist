@@ -6,14 +6,30 @@ Real-time AI-powered navigation assistance with object detection, path guidance,
 
 ## 🚀 Production Setup (Recommended)
 
-### 1. Backend Deployed on AWS
-Backend is running on AWS: `http://18.222.141.234:8000`
+### 1. Backend Deployed with ngrok
+Backend is running on ngrok: `https://flagless-clinographic-janita.ngrok-free.dev`
 
 ### 2. Use Live Frontend & Client
 - **Frontend**: https://arun664.github.io/VisualAssist/
 - **Client**: https://arun664.github.io/VisualAssist/client/
 
-**✨ Zero setup needed!** Both frontend/client (GitHub Pages) and backend (AWS) are fully hosted in the cloud.
+**✨ Zero setup needed!** Both frontend/client (GitHub Pages) and backend (ngrok HTTPS tunnel) are fully hosted and accessible.
+
+## 🎯 How to Use
+
+### Client Device (Camera Source)
+1. Open: https://arun664.github.io/VisualAssist/client/
+2. **Connect to Backend** - Click "Connect to Backend" button
+3. **Enable Camera & Microphone** - Grant permissions for media access
+4. **Start Streaming to Backend** - Begin sending video/audio to AI
+
+### Frontend Interface (Navigation Control)  
+1. Open: https://arun664.github.io/VisualAssist/
+2. **Start Navigation** - Click "Start Navigation" for audio guidance
+3. **Monitor Status** - View processed video stream and system status
+4. **Stop Navigation** - Click "Stop Navigation" when done
+
+**Connection Flow**: Backend Connection → Media Permissions → Streaming → Navigation
 
 ## 🛠️ Local Development Setup
 
@@ -100,26 +116,27 @@ vision_processor = VisionProcessor(
 ## 🌐 Production Architecture
 
 ```
-GitHub Pages (HTTPS)          AWS Instance (HTTP)
+GitHub Pages (HTTPS)          ngrok Tunnel (HTTPS)
 ┌─────────────────┐         ┌──────────────────┐
 │  Frontend       │◄────────┤  Backend         │
-│  Client         │  CORS   │  + Pretrained AI │
+│  Client         │ Secure  │  + Pretrained AI │
 └─────────────────┘         └──────────────────┘
 ```
 
 ### Benefits:
 - ✅ **Free frontend hosting** (GitHub Pages)
-- ✅ **Cloud backend hosting** (AWS)
-- ✅ **Scalable AI processing** (AWS infrastructure)
+- ✅ **HTTPS tunnel backend** (ngrok)
+- ✅ **Secure connections** (HTTPS/WSS throughout)
+- ✅ **Mobile compatible** (no Mixed Content issues)
 - ✅ **No model files to manage** (auto-download)
-- ✅ **Simple deployment** (GitHub Pages + AWS)
+- ✅ **Simple deployment** (GitHub Pages + ngrok tunnel)
 - ✅ **Zero local setup** (fully cloud-hosted)
 
 ## 🧪 Test Backend
 
 ```bash
-# Check AWS backend health
-curl http://18.222.141.234:8000/health
+# Check ngrok backend health
+curl https://flagless-clinographic-janita.ngrok-free.dev/health
 ```
 
 ## 🔍 How It Works
@@ -164,18 +181,19 @@ pip uninstall ultralytics
 pip install ultralytics
 ```
 
-### CORS Issues
-**Production (AWS)**: CORS is configured for HTTP connections from GitHub Pages.
+### Connection Issues
+**Production**: All connections now use secure HTTPS (no CORS or Mixed Content issues).
 
-**If CORS issues occur**: 
-1. **Use Chrome with CORS disabled**:
-   ```
-   chrome.exe --disable-web-security --user-data-dir="C:\temp\chrome-cors"
-   ```
+**Benefits of HTTPS**:
+- ✅ **Mobile browsers work** (no Mixed Content blocking)
+- ✅ **Secure WebSocket connections** (WSS instead of WS) 
+- ✅ **No browser security warnings**
+- ✅ **No need to disable CORS** or browser security
 
-2. **Or restart local backend**:
-   ```bash
-   docker-compose restart backend
+**If connection issues occur**: 
+1. **Check network connectivity**
+2. **Verify ngrok tunnel is running**
+3. **Try refreshing the page**
    ```
 
 ### Performance Issues
@@ -223,7 +241,7 @@ pip install ultralytics
 ### Live URLs
 - **Frontend**: `https://arun664.github.io/VisualAssist/`
 - **Client**: `https://arun664.github.io/VisualAssist/client/`
-- **Backend**: `http://18.222.141.234:8000` (AWS)
+- **Backend**: `https://flagless-clinographic-janita.ngrok-free.dev` (ngrok HTTPS tunnel)
 
 ### Local Development
 ```bash

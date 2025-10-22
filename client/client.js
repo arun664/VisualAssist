@@ -161,23 +161,28 @@ class NavigationClient {
     }
 
     async createPeerConnection() {
-        // ICE servers configuration
+        // Enhanced ICE servers configuration for better connectivity
         const configuration = {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' }
+            ],
+            iceCandidatePoolSize: 10
         };
         
         this.peerConnection = new RTCPeerConnection(configuration);
         
         // Set up event handlers
         this.peerConnection.onicecandidate = (event) => {
-            if (event.candidate && this.websocket) {
-                this.websocket.send(JSON.stringify({
-                    type: 'ice-candidate',
-                    candidate: event.candidate
-                }));
+            if (event.candidate) {
+                console.log('ICE candidate generated:', event.candidate.type, event.candidate.candidate);
+                // Note: No WebSocket for ICE candidates in this implementation
+                // ICE candidates are handled via HTTP polling or other mechanisms
+            } else {
+                console.log('ICE gathering completed');
             }
         };
         
@@ -206,7 +211,8 @@ class NavigationClient {
                     
                 case 'failed':
                     document.getElementById('connectionIndicator').className = 'status-indicator error';
-                    this.showError('WebRTC connection failed');
+                    console.error('WebRTC connection failed - possible causes: firewall, NAT, or network restrictions');
+                    this.showError('WebRTC connection failed - check network/firewall settings');
                     this.handleConnectionFailure();
                     break;
                     
@@ -222,11 +228,85 @@ class NavigationClient {
         this.peerConnection.oniceconnectionstatechange = () => {
             const iceState = this.peerConnection.iceConnectionState;
             document.getElementById('iceState').textContent = iceState;
+            console.log(`ICE connection state changed to: ${iceState}`);
             
-            if (iceState === 'failed') {
-                this.handleConnectionFailure();
+            switch (iceState) {
+                case 'connected':
+                case 'completed':
+                    console.log('✅ ICE connection established successfully');
+                    break;
+                case 'disconnected':
+                    console.warn('⚠️ ICE connection disconnected');
+                    break;
+                case 'failed':
+                    console.error('❌ ICE connection failed - network connectivity issues');
+                    this.showError('Network connection failed - check firewall/NAT settings');
+                    this.handleConnectionFailure();
+                    break;
+                case 'checking':
+                    console.log('🔍 ICE connectivity checks in progress...');
+                    break;
+                default:
+                    console.log(`ICE connection state: ${iceState}`);
             }
         };
+        
+        this.peerConnection.onicegatheringstatechange = () => {
+            const gatheringState = this.peerConnection.iceGatheringState;
+            console.log(`ICE gathering state: ${gatheringState}`);
+            
+            if (gatheringState === 'complete') {
+                console.log('✅ ICE candidate gathering completed');
+            }
+        };
+    }
+
+    async testWebRTCConnectivity() {
+        console.log('🔍 Testing WebRTC connectivity...');
+        
+        try {
+            // Create a test peer connection with the same configuration
+            const testConfig = {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' }
+                ]
+            };
+            
+            const testPC = new RTCPeerConnection(testConfig);
+            
+            // Create a data channel to test connectivity
+            const dataChannel = testPC.createDataChannel('test');
+            
+            // Create an offer to trigger ICE gathering
+            const offer = await testPC.createOffer();
+            await testPC.setLocalDescription(offer);
+            
+            // Wait for ICE gathering to complete or timeout
+            const iceGatheringPromise = new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('ICE gathering timeout'));
+                }, 10000);
+                
+                testPC.onicegatheringstatechange = () => {
+                    if (testPC.iceGatheringState === 'complete') {
+                        clearTimeout(timeout);
+                        resolve(testPC.localDescription);
+                    }
+                };
+            });
+            
+            const localDesc = await iceGatheringPromise;
+            const candidateCount = (localDesc.sdp.match(/a=candidate/g) || []).length;
+            
+            console.log(`✅ WebRTC connectivity test passed - ${candidateCount} ICE candidates found`);
+            testPC.close();
+            
+            return { success: true, candidateCount };
+            
+        } catch (error) {
+            console.error('❌ WebRTC connectivity test failed:', error);
+            return { success: false, error: error.message };
+        }
     }
 
     // WebSocket signaling removed - client now uses HTTP for WebRTC offers
@@ -624,6 +704,9 @@ class NavigationClient {
         // Biometric button
         document.getElementById('enableBiometricBtn').addEventListener('click', () => this.enableBiometrics());
         
+        // WebRTC connectivity test button
+        document.getElementById('testWebRTCBtn').addEventListener('click', () => this.testWebRTCConnectivity());
+        
         // Server URL input
         document.getElementById('serverUrl').addEventListener('input', (e) => {
             this.updateConnectButtonState();
@@ -845,6 +928,18 @@ class NavigationClient {
             // Backend already connected - set up WebRTC streaming
             console.log('Backend connected - setting up WebRTC streaming...');
             this.updateStreamStatus('Setting up WebRTC...');
+            
+            // Test WebRTC connectivity first
+            console.log('Testing WebRTC connectivity before establishing connection...');
+            const connectivityTest = await this.testWebRTCConnectivity();
+            
+            if (!connectivityTest.success) {
+                this.showError(`WebRTC connectivity test failed: ${connectivityTest.error}. Check network/firewall settings.`);
+                this.updateStreamStatus('WebRTC connectivity failed');
+                return;
+            }
+            
+            console.log(`✅ WebRTC connectivity OK (${connectivityTest.candidateCount} ICE candidates)`);
             
             // Add a small delay to ensure backend is ready for WebRTC
             await new Promise(resolve => setTimeout(resolve, 1000));

@@ -6,14 +6,14 @@
 - **Frontend**: https://arun664.github.io/VisualAssist/
 - **Client**: https://arun664.github.io/VisualAssist/client/
 
-That's it! Both frontend/client (GitHub Pages) and backend (AWS) are fully hosted in the cloud.
+That's it! Both frontend/client (GitHub Pages) and backend (ngrok HTTPS tunnel) are fully hosted and accessible.
 
 ## What You Get
 
 - ✅ **Free frontend hosting** (GitHub Pages)
-- ✅ **Cloud AI backend** (AWS)
-- ✅ **Scalable processing** (AWS infrastructure)
-- ✅ **Simple deployment** (GitHub Pages + AWS)
+- ✅ **HTTPS backend tunnel** (ngrok)
+- ✅ **Secure connections** (HTTPS/WSS)
+- ✅ **Mobile compatible** (no Mixed Content issues)
 - ✅ **Zero setup complexity** (just open URLs!)
 
 ## Local Development Commands
@@ -29,19 +29,18 @@ docker-compose logs backend
 # Stop backend
 docker-compose down
 
-# Test AWS backend
-curl http://18.222.141.234:8000/health
+# Test ngrok backend
+curl https://flagless-clinographic-janita.ngrok-free.dev/health
 ```
 
 ## Troubleshooting
 
-### CORS Issues
-Use Chrome with CORS disabled:
-```bash
-chrome.exe --disable-web-security --user-data-dir="C:\temp\chrome-cors"
-```
+### Connection Issues
+- **HTTPS**: All connections now use secure HTTPS (no Mixed Content issues)
+- **Mobile**: Works on mobile browsers (no CORS problems)
+- **Desktop**: No need to disable browser security
 
-### Backend Not Starting
+### Backend Not Starting (Local Development)
 ```bash
 # Check Docker
 docker --version
@@ -54,7 +53,7 @@ docker-compose up -d backend
 
 ### Frontend Not Loading
 - Check GitHub Pages deployment in repository Actions tab
-- Ensure backend is running on 18.222.141.234:8000
+- Ensure backend is running on https://flagless-clinographic-janita.ngrok-free.dev
 - Try refreshing the page
 
 ---
