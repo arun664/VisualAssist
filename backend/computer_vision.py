@@ -585,10 +585,10 @@ class VisionProcessor:
     def draw_overlays(self, frame: np.ndarray, detections: List[Detection], 
                      safe_path_grid: np.ndarray) -> np.ndarray:
         """
-        Create enhanced visual overlay rendering system exactly like the banquet hall example
-        - Green marks/areas = Safe zones for movement (no obstacles)
-        - Red marks/areas = Obstacles/blocked areas 
-        - Clear bounding boxes around all detected objects (chairs, tables, etc.)
+        Create clean and reasonable visual overlay system for navigation
+        - Selective marking of key safe/blocked zones
+        - Clean bounding boxes only for important obstacles
+        - Minimal clutter with maximum clarity
         
         Args:
             frame: Input video frame
@@ -596,7 +596,7 @@ class VisionProcessor:
             safe_path_grid: Binary grid with safe path information
             
         Returns:
-            Frame with enhanced visual overlays for navigation exactly like requested
+            Frame with clean visual overlays for navigation
         """
         overlay_frame = frame.copy()
         height, width = frame.shape[:2]
@@ -605,147 +605,213 @@ class VisionProcessor:
         cell_height = height // self.grid_rows
         cell_width = width // self.grid_cols
         
-        # 1. DRAW SAFE AND BLOCKED ZONES (like the green/red marks in the image)
+        # 1. DRAW SELECTIVE SAFE/BLOCKED ZONE INDICATORS
+        # Only mark zones that are critical for navigation (not every single cell)
         for row in range(self.grid_rows):
             for col in range(self.grid_cols):
                 x1 = col * cell_width
                 y1 = row * cell_height
-                x2 = x1 + cell_width
-                y2 = y1 + cell_height
-                
-                # Calculate center of each grid cell for mark placement
                 center_x = x1 + cell_width // 2
                 center_y = y1 + cell_height // 2
                 
-                if safe_path_grid[row, col] == 1:  # Safe zone
-                    # Draw bright GREEN marks for safe movement areas
-                    # Use filled circles similar to the green marks in your image
-                    cv2.circle(overlay_frame, (center_x, center_y), 15, (0, 255, 0), -1)
-                    cv2.circle(overlay_frame, (center_x, center_y), 15, (0, 200, 0), 3)  # Border
-                    
-                    # Add subtle green overlay for the entire safe area
-                    cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    
-                else:  # Blocked zone  
-                    # Draw bright RED marks for obstacles/blocked areas
-                    # Use filled circles similar to the red marks in your image
-                    cv2.circle(overlay_frame, (center_x, center_y), 15, (0, 0, 255), -1)
-                    cv2.circle(overlay_frame, (center_x, center_y), 15, (0, 0, 200), 3)  # Border
-                    
-                    # Add subtle red overlay for blocked areas
-                    cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                # Only draw indicators in key areas (center corridor and edges)
+                is_center_path = (col >= self.grid_cols // 3 and col <= 2 * self.grid_cols // 3)
+                is_edge_area = (row == 0 or row == self.grid_rows - 1 or col == 0 or col == self.grid_cols - 1)
+                
+                if is_center_path or is_edge_area:
+                    if safe_path_grid[row, col] == 1:  # Safe zone
+                        # Small green indicators for safe movement areas
+                        cv2.circle(overlay_frame, (center_x, center_y), 8, (0, 255, 0), -1)
+                        cv2.circle(overlay_frame, (center_x, center_y), 10, (0, 200, 0), 2)
+                    else:  # Blocked zone  
+                        # Small red indicators for critical blocked areas
+                        cv2.circle(overlay_frame, (center_x, center_y), 8, (0, 0, 255), -1)
+                        cv2.circle(overlay_frame, (center_x, center_y), 10, (0, 0, 200), 2)
         
-        # 2. DRAW CLEAR BOUNDING BOXES around ALL detected objects (chairs, tables, etc.)
-        for detection in detections:
+        # 2. DRAW CLEAN BOUNDING BOXES - Only for significant navigation obstacles
+        important_objects = []
+        
+        # Sort detections by confidence and area to prioritize most relevant objects
+        sorted_detections = sorted(detections, key=lambda d: (d.confidence * ((d.bbox[2]-d.bbox[0])*(d.bbox[3]-d.bbox[1]))), reverse=True)
+        
+        for detection in sorted_detections:
+            x1, y1, x2, y2 = detection.bbox
+            object_width = x2 - x1
+            object_height = y2 - y1
+            object_area = object_width * object_height
+            
+            # Only draw boxes for objects that are reasonably sized and relevant
+            min_display_area = (width * height) * 0.01   # At least 1% of frame
+            max_display_area = (width * height) * 0.25   # At most 25% of frame
+            
+            # Confidence threshold for display
+            min_confidence = 0.3
+            
+            if (min_display_area <= object_area <= max_display_area and 
+                detection.confidence >= min_confidence):
+                
+                # Filter to only show the most navigation-relevant objects
+                navigation_relevant_objects = [
+                    'chair', 'dining table', 'couch', 'bed', 'person', 
+                    'potted plant', 'tv', 'laptop', 'backpack', 'suitcase'
+                ]
+                
+                if detection.class_name in navigation_relevant_objects:
+                    # Check for overlap with existing objects to avoid redundant boxes
+                    is_overlapping = False
+                    for existing in important_objects:
+                        if self._boxes_overlap(detection.bbox, existing.bbox, overlap_threshold=0.5):
+                            is_overlapping = True
+                            break
+                    
+                    # Limit to maximum 8 objects to avoid clutter
+                    if not is_overlapping and len(important_objects) < 8:
+                        important_objects.append(detection)
+        
+        # Draw clean bounding boxes for important objects only
+        for detection in important_objects:
             x1, y1, x2, y2 = detection.bbox
             
-            # Draw thick, clear bounding box around each object
-            # Use bright colors for maximum visibility
-            if detection.class_name in ['chair', 'dining table', 'couch', 'bed']:
-                # Furniture gets bright blue boxes for clarity
-                cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), (255, 165, 0), 4)  # Orange
+            # Choose appropriate colors based on object type
+            if detection.class_name in ['chair', 'dining table']:
+                # Furniture: Clean blue boxes
+                box_color = (255, 120, 0)  # Orange-blue
+                label_bg_color = (255, 120, 0)
             elif detection.class_name == 'person':
-                # People get yellow boxes
-                cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), (0, 255, 255), 4)  # Yellow
+                # People: Yellow boxes for visibility
+                box_color = (0, 255, 255)  # Yellow
+                label_bg_color = (0, 200, 200)
             else:
-                # Other obstacles get red boxes
-                cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), (0, 0, 255), 4)  # Red
+                # Other obstacles: Red boxes
+                box_color = (0, 100, 255)  # Red-orange
+                label_bg_color = (0, 100, 255)
             
-            # Add clear object label with enhanced visibility
-            label = f"{detection.class_name.upper()}"
-            confidence_text = f"{detection.confidence:.1%}"
+            # Draw clean bounding box with moderate thickness
+            cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), box_color, 3)
             
-            # Calculate label dimensions
-            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-            conf_size = cv2.getTextSize(confidence_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+            # Add simple, readable label (no confidence clutter)
+            label = detection.class_name.title()
             
-            # Draw label background for maximum readability
+            # Calculate compact label size
+            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+            
+            # Draw compact label background
             label_bg_x1 = x1
-            label_bg_y1 = y1 - label_size[1] - conf_size[1] - 15
-            label_bg_x2 = x1 + max(label_size[0], conf_size[0]) + 15
+            label_bg_y1 = y1 - label_size[1] - 10
+            label_bg_x2 = x1 + label_size[0] + 10
             label_bg_y2 = y1
             
-            # Black background with white border for labels
-            cv2.rectangle(overlay_frame, (label_bg_x1, label_bg_y1), 
-                         (label_bg_x2, label_bg_y2), (0, 0, 0), -1)
-            cv2.rectangle(overlay_frame, (label_bg_x1, label_bg_y1), 
-                         (label_bg_x2, label_bg_y2), (255, 255, 255), 2)
+            # Ensure label stays within frame
+            if label_bg_y1 < 0:
+                label_bg_y1 = y2
+                label_bg_y2 = y2 + label_size[1] + 10
             
-            # Draw white text on black background for maximum contrast
-            cv2.putText(overlay_frame, label, (x1 + 5, y1 - conf_size[1] - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-            cv2.putText(overlay_frame, confidence_text, (x1 + 5, y1 - 5),
+            # Semi-transparent label background for clarity without obstruction
+            overlay = overlay_frame.copy()
+            cv2.rectangle(overlay, (label_bg_x1, label_bg_y1), (label_bg_x2, label_bg_y2), label_bg_color, -1)
+            cv2.addWeighted(overlay, 0.7, overlay_frame, 0.3, 0, overlay_frame)
+            
+            # Draw white text for maximum readability
+            text_y = label_bg_y1 + label_size[1] + 5 if label_bg_y1 >= 0 else y2 + label_size[1] + 5
+            cv2.putText(overlay_frame, label, (x1 + 5, text_y),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
-        # 3. NAVIGATION STATUS INDICATOR
+        # 3. CLEAN NAVIGATION STATUS (minimal, unobtrusive)
         safe_cells = np.sum(safe_path_grid)
         total_cells = safe_path_grid.size
-        safe_percentage = (safe_cells / total_cells) * 100
         
-        # Status background
+        # Simple status indicator in top-left corner
         status_bg_x1, status_bg_y1 = 10, 10
-        status_bg_x2, status_bg_y2 = 400, 120
-        cv2.rectangle(overlay_frame, (status_bg_x1, status_bg_y1), 
-                     (status_bg_x2, status_bg_y2), (0, 0, 0), -1)
-        cv2.rectangle(overlay_frame, (status_bg_x1, status_bg_y1), 
-                     (status_bg_x2, status_bg_y2), (255, 255, 255), 2)
+        status_bg_x2, status_bg_y2 = 200, 50
         
-        # Navigation status
+        # Semi-transparent background
+        overlay = overlay_frame.copy()
+        cv2.rectangle(overlay, (status_bg_x1, status_bg_y1), (status_bg_x2, status_bg_y2), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.6, overlay_frame, 0.4, 0, overlay_frame)
+        
+        # Navigation status with clean text
         if self.has_clear_path(safe_path_grid):
-            status_text = "NAVIGATION: CLEAR PATH"
+            status_text = "PATH CLEAR"
             status_color = (0, 255, 0)  # Green
             
-            # Draw forward navigation arrow
+            # Simple navigation arrow (less intrusive)
             center_x = width // 2
-            arrow_start_y = int(height * 0.85)
-            arrow_end_y = int(height * 0.65)
+            arrow_start_y = int(height * 0.9)
+            arrow_end_y = int(height * 0.8)
             cv2.arrowedLine(overlay_frame, (center_x, arrow_start_y), 
-                          (center_x, arrow_end_y), (0, 255, 0), 8, tipLength=0.3)
+                          (center_x, arrow_end_y), (0, 255, 0), 4, tipLength=0.2)
         else:
-            status_text = "NAVIGATION: OBSTACLES DETECTED"
+            status_text = "OBSTACLES"
             status_color = (0, 0, 255)  # Red
         
-        # Draw status information
-        cv2.putText(overlay_frame, status_text, (20, 35),
+        # Draw clean status text
+        cv2.putText(overlay_frame, status_text, (15, 35),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
-        cv2.putText(overlay_frame, f"OBJECTS DETECTED: {len(detections)}", (20, 60),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        cv2.putText(overlay_frame, f"SAFE AREAS: {safe_percentage:.1f}%", (20, 85),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        cv2.putText(overlay_frame, f"GRID: {safe_cells}/{total_cells} CLEAR", (20, 110),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
         
-        # 4. GROUND LEVEL INDICATOR (like in banquet hall analysis)
-        ground_line_y = int(height * 0.3)
-        cv2.line(overlay_frame, (0, ground_line_y), (width, ground_line_y), 
-                (255, 255, 0), 3)  # Thick yellow line
-        cv2.putText(overlay_frame, "GROUND LEVEL ANALYSIS", (width - 300, ground_line_y - 10),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-        
-        # 5. LEGEND (like the color coding you showed)
-        legend_x = width - 250
-        legend_y = height - 120
-        
-        # Legend background
-        cv2.rectangle(overlay_frame, (legend_x - 10, legend_y - 40), 
-                     (width - 10, height - 10), (0, 0, 0), -1)
-        cv2.rectangle(overlay_frame, (legend_x - 10, legend_y - 40), 
-                     (width - 10, height - 10), (255, 255, 255), 2)
-        
-        # Legend items
-        cv2.circle(overlay_frame, (legend_x, legend_y), 8, (0, 255, 0), -1)
-        cv2.putText(overlay_frame, "SAFE ZONES", (legend_x + 20, legend_y + 5),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-        
-        cv2.circle(overlay_frame, (legend_x, legend_y + 25), 8, (0, 0, 255), -1)
-        cv2.putText(overlay_frame, "OBSTACLES", (legend_x + 20, legend_y + 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-        
-        cv2.rectangle(overlay_frame, (legend_x, legend_y + 50), (legend_x + 15, legend_y + 65), (255, 165, 0), 3)
-        cv2.putText(overlay_frame, "OBJECTS", (legend_x + 20, legend_y + 65),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        # Show count of important objects only (less clutter)
+        if len(important_objects) > 0:
+            count_text = f"Objects: {len(important_objects)}"
+            cv2.putText(overlay_frame, count_text, (width - 150, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         return overlay_frame
+    
+    def _boxes_overlap(self, bbox1: Tuple[int, int, int, int], bbox2: Tuple[int, int, int, int], 
+                      overlap_threshold: float = 0.5) -> bool:
+        """Check if two bounding boxes overlap significantly"""
+        x1_1, y1_1, x2_1, y2_1 = bbox1
+        x1_2, y1_2, x2_2, y2_2 = bbox2
+        
+        # Calculate intersection area
+        intersection_x1 = max(x1_1, x1_2)
+        intersection_y1 = max(y1_1, y1_2)
+        intersection_x2 = min(x2_1, x2_2)
+        intersection_y2 = min(y2_1, y2_2)
+        
+        if intersection_x1 >= intersection_x2 or intersection_y1 >= intersection_y2:
+            return False  # No overlap
+        
+        intersection_area = (intersection_x2 - intersection_x1) * (intersection_y2 - intersection_y1)
+        
+        # Calculate areas of both boxes
+        area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+        
+        # Calculate overlap ratio
+        overlap_ratio = intersection_area / min(area1, area2)
+        
+        return overlap_ratio > overlap_threshold
+    
+    def create_demo_visualization(self, frame_width: int = 800, frame_height: int = 600) -> np.ndarray:
+        """Create a demo frame showing the clean visualization system"""
+        import numpy as np
+        
+        # Create a demo frame (simulating a banquet hall view)
+        demo_frame = np.ones((frame_height, frame_width, 3), dtype=np.uint8) * 50  # Dark background
+        
+        # Simulate some furniture detections for demo
+        demo_detections = [
+            Detection(class_id=56, confidence=0.85, bbox=(100, 200, 200, 300), class_name="chair"),
+            Detection(class_id=60, confidence=0.92, bbox=(250, 180, 400, 320), class_name="dining table"),
+            Detection(class_id=56, confidence=0.78, bbox=(450, 210, 550, 310), class_name="chair"),
+            Detection(class_id=0, confidence=0.95, bbox=(300, 100, 380, 250), class_name="person"),
+            Detection(class_id=56, confidence=0.82, bbox=(600, 190, 700, 290), class_name="chair")
+        ]
+        
+        # Create a demo safe path grid
+        demo_safe_grid = np.ones((self.grid_rows, self.grid_cols), dtype=int)
+        # Mark some areas as blocked around the furniture
+        demo_safe_grid[2:4, 1:3] = 0  # Around table area
+        demo_safe_grid[3:5, 6:8] = 0  # Another blocked area
+        
+        # Apply the clean visualization
+        result_frame = self.draw_overlays(demo_frame, demo_detections, demo_safe_grid)
+        
+        # Add demo title
+        cv2.putText(result_frame, "Clean Navigation Visualization Demo", (10, frame_height - 20),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        return result_frame
     
     async def process_frame_complete(self, frame: np.ndarray) -> Dict[str, Any]:
         """
