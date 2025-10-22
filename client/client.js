@@ -198,21 +198,29 @@ class NavigationClient {
             switch (state) {
                 case 'connected':
                     document.getElementById('connectionIndicator').className = 'status-indicator active';
+                    document.getElementById('streamIndicator').className = 'status-indicator active';
+                    this.updateStreamStatus('Streaming to backend');
                     this.reconnectAttempts = 0; // Reset on successful connection
+                    console.log('✅ WebRTC connection established - now streaming to backend');
                     break;
                     
                 case 'connecting':
                     document.getElementById('connectionIndicator').className = 'status-indicator warning';
+                    this.updateStreamStatus('Establishing WebRTC connection...');
                     break;
                     
                 case 'disconnected':
                     document.getElementById('connectionIndicator').className = 'status-indicator error';
+                    document.getElementById('streamIndicator').className = 'status-indicator error';
+                    this.updateStreamStatus('Connection lost');
                     this.showError('WebRTC connection lost');
                     this.handleConnectionFailure();
                     break;
                     
                 case 'failed':
                     document.getElementById('connectionIndicator').className = 'status-indicator error';
+                    document.getElementById('streamIndicator').className = 'status-indicator error';
+                    this.updateStreamStatus('Connection failed');
                     console.error('WebRTC connection failed - possible causes: firewall, NAT, or network restrictions');
                     this.showError('WebRTC connection failed - check network/firewall settings');
                     this.handleConnectionFailure();
@@ -220,6 +228,8 @@ class NavigationClient {
                     
                 case 'closed':
                     document.getElementById('connectionIndicator').className = 'status-indicator inactive';
+                    document.getElementById('streamIndicator').className = 'status-indicator inactive';
+                    this.updateStreamStatus('Inactive');
                     break;
                     
                 default:
@@ -374,8 +384,8 @@ class NavigationClient {
                 });
                 
                 await this.peerConnection.setRemoteDescription(answer);
-                console.log('WebRTC connection established');
-                this.updateStreamStatus('Connected');
+                console.log('WebRTC answer processed - waiting for connection establishment');
+                // Don't update stream status here - let the connection state handler do it
             } else {
                 throw new Error('Failed to get answer from server');
             }
@@ -1023,9 +1033,9 @@ class NavigationClient {
             this.localStream = combinedStream;
             console.log('Local stream created successfully with', this.localStream.getTracks().length, 'tracks');
             
-            // Update UI to show local streaming is active
-            this.updateStreamStatus('Local stream active');
-            document.getElementById('streamIndicator').className = 'status-indicator active';
+            // Update UI to show local streaming is ready (but not backend streaming yet)
+            this.updateStreamStatus('Local stream ready');
+            document.getElementById('streamIndicator').className = 'status-indicator warning';
             document.getElementById('startStreamBtn').disabled = true;
             document.getElementById('stopStreamBtn').disabled = false;
             
@@ -1033,13 +1043,13 @@ class NavigationClient {
             if (!this.isConnected) {
                 console.log('Local stream ready - backend not connected yet');
                 this.updateStreamStatus('Local only (backend disconnected)');
-                this.showError('Connect to backend first using the "Manual Connect" button before streaming to server');
+                this.showError('Connect to backend first using the "Connect to Backend" button before streaming to server');
                 return;
             }
             
             // Backend already connected - set up WebRTC streaming
             console.log('Backend connected - setting up WebRTC streaming...');
-            this.updateStreamStatus('Setting up WebRTC...');
+            this.updateStreamStatus('Connecting to backend...');
             
             // Test WebRTC connectivity first
             console.log('Testing WebRTC connectivity before establishing connection...');
@@ -1048,6 +1058,7 @@ class NavigationClient {
             if (!connectivityTest.success) {
                 this.showError(`WebRTC connectivity test failed: ${connectivityTest.error}. Check network/firewall settings.`);
                 this.updateStreamStatus('WebRTC connectivity failed');
+                document.getElementById('streamIndicator').className = 'status-indicator error';
                 return;
             }
             
@@ -1071,16 +1082,20 @@ class NavigationClient {
             
             // Create and send offer
             console.log('Creating and sending WebRTC offer...');
+            this.updateStreamStatus('Establishing WebRTC connection...');
             await this.createAndSendOffer();
             
-            // WebRTC connection successful
-            this.updateStreamStatus('Streaming to backend');
-            console.log('✅ Full streaming pipeline active: Local → WebRTC → Backend');
+            // WebRTC offer sent successfully - actual connection status will be updated by connection state handler
+            console.log('✅ WebRTC offer sent successfully - waiting for connection establishment');
             
         } catch (error) {
             this.showError('Failed to start streaming: ' + error.message);
-            this.updateStreamStatus('Error');
+            this.updateStreamStatus('Streaming failed');
             document.getElementById('streamIndicator').className = 'status-indicator error';
+            
+            // Reset button states on error
+            document.getElementById('startStreamBtn').disabled = false;
+            document.getElementById('stopStreamBtn').disabled = true;
         }
     }
 
