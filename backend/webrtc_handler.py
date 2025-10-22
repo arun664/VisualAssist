@@ -29,7 +29,8 @@ class WebRTCConnectionManager:
         self.last_error_time: Dict[str, float] = {}
         
         # Frame rate limiting for performance optimization
-        self.target_fps = 0.5  # Process 1 frame every 2 seconds
+        self.target_fps = 15.0  # Process 15 frames per second for smoother navigation
+        # With frame_skip=1 in config, this processes about 7.5 frames/second, or ~40% of frames
         self.last_processed_frame_time: Dict[str, float] = {}
         self.latest_processed_frame: Dict[str, Any] = {}  # Store latest processed frame for MJPEG streaming
         
@@ -348,21 +349,44 @@ class WebRTCConnectionManager:
                         logger.info(f"Video frame reception recovered for {client_id}")
                         self.video_error_counts[client_id] = 0
                     
-                    # Frame rate limiting: Only process frames at target FPS (1 FPS)
+                    # Frame rate limiting: Only process frames at target FPS (15 FPS)
                     current_time = time.time()
                     last_processed = self.last_processed_frame_time.get(client_id, 0)
                     time_since_last = current_time - last_processed
-                    min_interval = 1.0 / self.target_fps  # 1 second for 1 FPS
+                    min_interval = 1.0 / self.target_fps  # ~0.067 seconds for 15 FPS
                     
                     if time_since_last < min_interval:
                         # Skip this frame - too soon since last processed frame
                         logger.debug(f"Skipping frame from {client_id} - rate limiting "
                                    f"(last processed {time_since_last:.2f}s ago, min interval {min_interval:.2f}s)")
                         
-                        # Still convert and store frame for MJPEG streaming (lightweight operation)
-                        # Simple placeholder frame for rate limiting case
+                        # Still convert and store the actual frame for MJPEG streaming
+                        # This provides smoother visuals while limiting actual processing
                         import numpy as np
-                        img = np.zeros((480, 640, 3), dtype=np.uint8)  # Placeholder frame
+                        import av
+                        
+                        # Convert actual frame without processing
+                        if hasattr(frame, 'to_ndarray'):
+                            img = frame.to_ndarray(format='bgr24')
+                        else:
+                            # Convert using PyAV as fallback
+                            pyav_frame = av.VideoFrame.from_ndarray(
+                                np.array(frame.planes[0]), format='bgr24'
+                            )
+                            img = pyav_frame.to_ndarray(format='bgr24')
+                            
+                        # If conversion failed, use a placeholder
+                        if img is None or img.size == 0:
+                            img = np.zeros((480, 640, 3), dtype=np.uint8)
+                            
+                        # Get latest processed results for overlay continuity
+                        if client_id in self.latest_processed_frame:
+                            latest_results = self.latest_processed_frame[client_id].get("results", {})
+                            if latest_results and "processed_frame" in latest_results:
+                                # Use the last processed frame to maintain path visibility
+                                # This ensures paths don't disappear between processed frames
+                                img = latest_results["processed_frame"]
+                        
                         self._store_processed_frame(client_id, img)
                         continue
                     
@@ -489,16 +513,39 @@ class WebRTCConnectionManager:
             if "navigation_guidance" in processing_results:
                 navigation_guidance = processing_results["navigation_guidance"]
                 if navigation_guidance and navigation_guidance.get("navigation_message"):
-                    # Send navigation guidance message to client
+                    # Send navigation guidance message to client with audio
                     from websocket_manager import websocket_manager
-                    await websocket_manager.broadcast({
+                    
+                    # Create the navigation message
+                    navigation_message = {
                         "type": "navigation_guidance",
                         "message": navigation_guidance.get("navigation_message"),
                         "path_found": navigation_guidance.get("path_found", False),
                         "direction": navigation_guidance.get("direction"),
                         "action": "move_forward" if navigation_guidance.get("next_step") == "move_forward" else "turn",
-                        "timestamp": datetime.now().isoformat()
-                    })
+                        "timestamp": datetime.now().isoformat(),
+                        "speak": navigation_guidance.get("navigation_message"),  # Always include voice guidance
+                        "navigation": navigation_guidance  # Include full guidance info
+                    }
+                    
+                    # First try to use the dedicated navigation feed if available
+                    if hasattr(websocket_manager, 'navigation_feed') and websocket_manager.navigation_feed:
+                        # Format specifically for the navigation feed
+                        navigation_feed_message = {
+                            "type": "navigation_guidance",
+                            "guidance": {
+                                "navigation_message": navigation_guidance.get("navigation_message"),
+                                "path_found": navigation_guidance.get("path_found", False),
+                                "direction": navigation_guidance.get("direction"),
+                                "action": "move_forward" if navigation_guidance.get("next_step") == "move_forward" else "turn"
+                            },
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        # Use asyncio.create_task to avoid awaiting directly
+                        asyncio.create_task(websocket_manager.navigation_feed.update_navigation(navigation_feed_message))
+                    
+                    # Always send to regular WebSocket for backward compatibility
+                    await websocket_manager.broadcast(navigation_message)
                     
                     logger.info(f"Navigation guidance sent: {navigation_guidance.get('navigation_message')}")
             

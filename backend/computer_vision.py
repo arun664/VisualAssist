@@ -492,6 +492,7 @@ class VisionProcessor:
         """
         Implement ground-level safe path calculation using grid-based approach
         Focuses on walkable ground paths, ignoring ceiling/roof objects
+        Prioritizes finding paths between objects on plain ground
         
         Args:
             frame_shape: (height, width) of the video frame
@@ -510,7 +511,24 @@ class VisionProcessor:
         cell_width = width // self.grid_cols
         
         # Define ground level area (bottom 70% of frame for walking navigation)
+        # Prioritize plain ground paths by focusing on bottom 2/3 of frame
         ground_level_start = int(height * 0.3)  # Start from 30% down from top
+        
+        # Identify floor/ground plane as preference for paths
+        # We'll use the bottom third of the frame as priority for path finding
+        floor_priority_start = int(height * 0.67)  # Bottom 1/3 of frame
+        floor_priority_rows = []
+        for row in range(self.grid_rows):
+            row_top = row * cell_height
+            row_bottom = (row + 1) * cell_height
+            
+            # Check if this row is in the floor priority area
+            if row_bottom >= floor_priority_start:
+                floor_priority_rows.append(row)
+                
+                # Mark this as plain ground (preferred for path finding)
+                # Using value 2 for plain ground (higher preference)
+                grid[row, :] = 2
         
         # Mark obstacle cells as unsafe - only consider ground-level obstacles
         ground_obstacles = 0
@@ -527,8 +545,22 @@ class VisionProcessor:
             
             ground_obstacles += 1
             
-            # Add larger safety margin for navigation obstacles
-            safety_margin = self.safety_margin * 2  # Double margin for walking safety
+            # Calculate object size for adaptive safety margin
+            object_width = x2 - x1
+            object_height = y2 - y1
+            object_size_ratio = (object_width * object_height) / (width * height)
+            
+            # Add adaptive safety margin for navigation obstacles
+            base_margin = self.safety_margin * 2  # Double margin for walking safety
+            
+            # Larger objects need more margin
+            if object_size_ratio > 0.1:  # Large objects (>10% of frame)
+                safety_margin = base_margin * 1.5
+            elif object_size_ratio < 0.02:  # Small objects (<2% of frame)
+                safety_margin = base_margin * 0.75
+            else:
+                safety_margin = base_margin
+            
             x1 = max(0, x1 - safety_margin)
             y1 = max(0, y1 - safety_margin)
             x2 = min(width, x2 + safety_margin)
@@ -550,9 +582,21 @@ class VisionProcessor:
         top_rows_to_ignore = max(1, self.grid_rows // 3)  # Top 1/3 of grid
         grid[:top_rows_to_ignore, :] = 0
         
-        safe_cells = np.sum(grid)
+        # Convert any grid values of 2 (plain ground) back to 1 (safe path)
+        # but maintain the information for path finding
+        plain_ground_mask = (grid == 2)
+        grid_for_path_finding = grid.copy()  # Keep original for path finding with plain ground preference
+        grid[plain_ground_mask] = 1  # Convert to standard safe cell for standard algorithms
+        
+        safe_cells = np.sum(grid > 0)
+        plain_ground_cells = np.sum(plain_ground_mask)
         logger.debug(f"Ground-level path calculation: {ground_obstacles} obstacles detected, "
-                    f"{safe_cells} safe cells out of {grid.size} total cells")
+                    f"{safe_cells} safe cells with {plain_ground_cells} on plain ground "
+                    f"out of {grid.size} total cells")
+        
+        # Store the plain ground information for path finding
+        self.plain_ground_mask = plain_ground_mask
+        self.grid_for_path_finding = grid_for_path_finding
         
         return grid
     
@@ -820,13 +864,13 @@ class VisionProcessor:
         # Find the best path through the grid using simple pathfinding
         path_points = self._find_navigation_path(safe_path_grid)
         
-        # Navigation guidance information
+        # Navigation guidance information with clear voice instructions
         guidance_info = {
             "path_found": False,
             "direction": None,
             "next_step": None,
             "distance": 0,
-            "navigation_message": "Turn around to find a clear path"
+            "navigation_message": "No clear path detected. Turn slowly until you see a green path."
         }
         
         if not path_points:
@@ -959,13 +1003,17 @@ class VisionProcessor:
                 # Determine distance (rough estimate)
                 distance = len(path_points)
                 
-                # Create guidance message
+                # Create detailed guidance message with clear audio instructions
                 if direction == "forward":
-                    navigation_message = "Clear path ahead. Move forward one step."
-                elif direction:
-                    navigation_message = f"Turn slightly {direction} and move one step."
+                    navigation_message = "Clear path ahead. Move forward one step along the green path."
+                elif direction == "right":
+                    navigation_message = "Turn right to follow the green path, then move one step."
+                elif direction == "left":
+                    navigation_message = "Turn left to follow the green path, then move one step."
+                elif direction == "backward":
+                    navigation_message = "Turn around and move one step backward along the green path."
                 else:
-                    navigation_message = "Move forward carefully."
+                    navigation_message = "Follow the green path and move forward carefully."
                 
                 # Update guidance info
                 guidance_info = {
@@ -1021,6 +1069,7 @@ class VisionProcessor:
     def _find_navigation_path(self, safe_path_grid: np.ndarray) -> List[Tuple[int, int]]:
         """
         Find a natural-looking path through the safe grid cells
+        Prioritizes paths on plain ground and between objects
         
         Args:
             safe_path_grid: Binary grid with safe path information
@@ -1037,10 +1086,10 @@ class VisionProcessor:
         # Try to find a suitable start point if center is blocked
         if safe_path_grid[start_row, start_col] == 0:
             for offset in range(1, cols//2):
-                if start_col - offset >= 0 and safe_path_grid[start_row, start_col - offset] == 1:
+                if start_col - offset >= 0 and safe_path_grid[start_row, start_col - offset] > 0:
                     start_col = start_col - offset
                     break
-                elif start_col + offset < cols and safe_path_grid[start_row, start_col + offset] == 1:
+                elif start_col + offset < cols and safe_path_grid[start_row, start_col + offset] > 0:
                     start_col = start_col + offset
                     break
         
@@ -1048,18 +1097,73 @@ class VisionProcessor:
         if safe_path_grid[start_row, start_col] == 0:
             return []
         
-        # Find destination (somewhere in the top half of the grid)
-        dest_row = rows // 4  # Aim for top quarter
-        dest_col = cols // 2   # Center of grid
+        # Find destination - try to find a point between visible objects in the upper part
+        # First, identify objects in the scene
+        objects_present = []
+        for row in range(rows // 2):  # Look in upper half of grid
+            for col in range(cols):
+                # Find cells that are blocked (obstacles)
+                if safe_path_grid[row, col] == 0:
+                    # Look for pattern of obstacle cells (simple blob detection)
+                    blob_size = 0
+                    for dr in range(-1, 2):
+                        for dc in range(-1, 2):
+                            r, c = row + dr, col + dc
+                            if 0 <= r < rows and 0 <= c < cols and safe_path_grid[r, c] == 0:
+                                blob_size += 1
+                    
+                    # If this is a substantial obstacle, record it
+                    if blob_size >= 3:  # At least 3 connected cells
+                        objects_present.append((row, col))
         
-        # Try to find a suitable destination
+        # Find destination (somewhere in the top half of the grid)
+        # Default to center of top quarter
+        dest_row = rows // 4
+        dest_col = cols // 2
+        
+        # If we have multiple objects, try to find a path between them
+        if len(objects_present) >= 2:
+            # Find the centroid of obstacles
+            avg_row = sum(obj[0] for obj in objects_present) // len(objects_present)
+            avg_col = sum(obj[1] for obj in objects_present) // len(objects_present)
+            
+            # Look for a safe cell near this centroid
+            best_dest = None
+            min_dist = float('inf')
+            
+            # Search in spiral pattern from centroid
+            for radius in range(1, max(rows, cols) // 2):
+                for dr in range(-radius, radius + 1):
+                    for dc in range(-radius, radius + 1):
+                        # Only check cells on the perimeter of this radius
+                        if abs(dr) == radius or abs(dc) == radius:
+                            r, c = avg_row + dr, avg_col + dc
+                            if 0 <= r < rows and 0 <= c < cols and safe_path_grid[r, c] > 0:
+                                dist = abs(r - avg_row) + abs(c - avg_col)
+                                # Prefer plain ground (value 2) over regular safe cells (value 1)
+                                if hasattr(self, 'grid_for_path_finding') and self.grid_for_path_finding[r, c] == 2:
+                                    dist -= 1.0  # Bonus for plain ground
+                                
+                                if dist < min_dist:
+                                    min_dist = dist
+                                    best_dest = (r, c)
+                                    
+                # If we found a destination at this radius, use it
+                if best_dest is not None:
+                    dest_row, dest_col = best_dest
+                    break
+        
+        # If no destination found yet, try to find any suitable point
         if safe_path_grid[dest_row, dest_col] == 0:
             best_dest = None
             # Search top half for safe cells
             for r in range(0, rows//2):
                 for c in range(cols):
-                    if safe_path_grid[r, c] == 1:
-                        if best_dest is None or r < best_dest[0]:
+                    if safe_path_grid[r, c] > 0:
+                        # Prefer plain ground cells if available
+                        if best_dest is None or (hasattr(self, 'plain_ground_mask') and 
+                                                self.plain_ground_mask[r, c] and not 
+                                                self.plain_ground_mask[best_dest[0], best_dest[1]]):
                             best_dest = (r, c)
             
             if best_dest:
@@ -1068,14 +1172,17 @@ class VisionProcessor:
                 # No suitable destination found
                 return [(start_row, start_col)]  # Just return starting point
         
-        # Simple A* pathfinding
+        # Enhanced A* pathfinding with plain ground preference
         import heapq
+        
+        # Use custom grid for path finding if available (with plain ground preference)
+        path_grid = self.grid_for_path_finding if hasattr(self, 'grid_for_path_finding') else safe_path_grid
         
         # Initialize data structures for A*
         open_set = [(0, start_row, start_col)]  # Priority queue (f_score, row, col)
         came_from = {}  # To reconstruct the path
         g_score = {(start_row, start_col): 0}  # Cost from start
-        f_score = {(start_row, start_col): abs(start_row - dest_row) + abs(start_col - dest_col)}  # Estimated cost to goal
+        f_score = {(start_row, start_col): abs(start_row - dest_row) + abs(start_col - dest_col)}  # Estimated cost
         
         while open_set:
             _, current_row, current_col = heapq.heappop(open_set)
@@ -1090,16 +1197,25 @@ class VisionProcessor:
                 path.reverse()  # Start to destination
                 return path
             
-            # Check neighbors (4-directional movement)
+            # Check neighbors (8-directional movement)
             for dr, dc in [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
                 neighbor_row, neighbor_col = current_row + dr, current_col + dc
                 
                 # Check if valid and safe
                 if (0 <= neighbor_row < rows and 0 <= neighbor_col < cols and 
-                    safe_path_grid[neighbor_row, neighbor_col] == 1):
+                    path_grid[neighbor_row, neighbor_col] > 0):
                     
-                    # Calculate cost (diagonal movement costs more)
-                    move_cost = 1.4 if abs(dr) + abs(dc) > 1 else 1.0
+                    # Calculate cost with preference for plain ground
+                    # Diagonal movement costs more
+                    base_move_cost = 1.4 if abs(dr) + abs(dc) > 1 else 1.0
+                    
+                    # Plain ground preference - cells with value 2 get lower cost
+                    if path_grid[neighbor_row, neighbor_col] == 2:  # Plain ground
+                        # Make plain ground 30% cheaper to encourage paths there
+                        move_cost = base_move_cost * 0.7
+                    else:
+                        move_cost = base_move_cost
+                    
                     tentative_g = g_score[(current_row, current_col)] + move_cost
                     
                     if ((neighbor_row, neighbor_col) not in g_score or 
@@ -1108,13 +1224,65 @@ class VisionProcessor:
                         # This path is better
                         came_from[(neighbor_row, neighbor_col)] = (current_row, current_col)
                         g_score[(neighbor_row, neighbor_col)] = tentative_g
-                        f_score[(neighbor_row, neighbor_col)] = tentative_g + abs(neighbor_row - dest_row) + abs(neighbor_col - dest_col)
+                        # Add preference for staying on plain ground in heuristic
+                        plain_ground_bonus = 0
+                        if path_grid[neighbor_row, neighbor_col] == 2:
+                            plain_ground_bonus = -0.5  # Bonus for plain ground
+                        
+                        f_score[(neighbor_row, neighbor_col)] = (
+                            tentative_g + 
+                            abs(neighbor_row - dest_row) + 
+                            abs(neighbor_col - dest_col) + 
+                            plain_ground_bonus
+                        )
                         
                         # Add to open set if not already there
                         heapq.heappush(open_set, (f_score[(neighbor_row, neighbor_col)], neighbor_row, neighbor_col))
         
-        # No path found, return empty list
-        return []
+        # No path found, try a less restrictive approach - any walkable path
+        logger.debug("No optimal path found, trying simpler path approach")
+        
+        # Simple straight-line path approach as fallback
+        path = []
+        
+        # Add start point
+        path.append((start_row, start_col))
+        
+        # Add middle points - try to find a safe straight line path
+        steps = 10  # Number of steps in our path
+        for i in range(1, steps):
+            # Interpolate between start and destination
+            row = int(start_row + (dest_row - start_row) * i / steps)
+            col = int(start_col + (dest_col - start_col) * i / steps)
+            
+            # Ensure point is within grid
+            row = max(0, min(row, rows - 1))
+            col = max(0, min(col, cols - 1))
+            
+            # If point is not safe, try nearby points
+            if safe_path_grid[row, col] == 0:
+                found_safe = False
+                for dr in [-1, 0, 1]:
+                    for dc in [-1, 0, 1]:
+                        r, c = row + dr, col + dc
+                        if 0 <= r < rows and 0 <= c < cols and safe_path_grid[r, c] > 0:
+                            row, col = r, c
+                            found_safe = True
+                            break
+                    if found_safe:
+                        break
+                
+                # If no safe point found nearby, skip this step
+                if not found_safe:
+                    continue
+            
+            path.append((row, col))
+        
+        # Add destination if not already added
+        if path and path[-1] != (dest_row, dest_col):
+            path.append((dest_row, dest_col))
+        
+        return path
     
     def _suggest_alternative_paths(self, frame: np.ndarray, safe_path_grid: np.ndarray, 
                                  cell_width: int, cell_height: int) -> dict:
@@ -1397,6 +1565,82 @@ class VisionProcessor:
             Dictionary with processing results including detections, motion analysis, and processed frame
         """
         try:
+            # Frame skip implementation for performance optimization
+            if not hasattr(self, 'frame_counter'):
+                self.frame_counter = 0
+            
+            # Retrieve frame skip configuration - how many frames to skip between full processing
+            from config_manager import get_config
+            config = get_config()
+            frame_skip = config.computer_vision.frame_skip
+            
+            # Increment frame counter
+            self.frame_counter += 1
+            
+            # Use cached detections for skipped frames, but still do visual processing
+            if hasattr(self, 'last_results') and frame_skip > 0 and (self.frame_counter % (frame_skip + 1)) != 1:
+                # Always recalculate optical flow for accurate motion detection
+                motion_analysis = self.calculate_optical_flow(frame)
+                
+                # Reuse cached detections from last processed frame
+                last_results = self.last_results
+                cached_detections = [Detection(
+                    class_id=d["class_id"],
+                    class_name=d["class_name"],
+                    confidence=d["confidence"],
+                    bbox=tuple(d["bbox"])
+                ) for d in last_results["detections"]]
+                
+                # Update motion analysis
+                last_results["motion_analysis"] = {
+                    "flow_magnitude": motion_analysis.flow_magnitude,
+                    "is_stationary": motion_analysis.is_stationary,
+                    "confidence": motion_analysis.confidence
+                }
+                
+                # Re-calculate safe path grid with current frame dimensions (in case dimensions changed)
+                safe_path_grid = self.calculate_safe_path(frame.shape, cached_detections)
+                
+                # Enhanced path finding - even on skipped frames for better visual continuity
+                # Check if path is clear and improve path visualization
+                path_clear = self.has_clear_path(safe_path_grid)
+                
+                # Always redraw overlays on the current frame for visual continuity
+                processed_frame, navigation_guidance = self.draw_overlays(frame, cached_detections, safe_path_grid)
+                
+                # Update timestamp and frame information
+                last_results["processed_frame"] = processed_frame  # Use processed frame with overlays
+                last_results["timestamp"] = datetime.now().isoformat()
+                last_results["frame_skipped"] = True
+                last_results["path_analysis"]["safe_path_grid"] = safe_path_grid.tolist()
+                last_results["path_analysis"]["path_clear"] = path_clear
+                last_results["navigation_guidance"] = navigation_guidance
+                
+                # Force broadcast even on skipped frames for better navigation updates
+                try:
+                    from websocket_manager import websocket_manager
+                    
+                    # First try to use the dedicated navigation feed if available
+                    if hasattr(websocket_manager, 'navigation_feed') and websocket_manager.navigation_feed:
+                        asyncio.create_task(websocket_manager.navigation_feed.update_navigation({
+                            "type": "navigation_guidance",
+                            "guidance": navigation_guidance,
+                            "timestamp": last_results["timestamp"],
+                            "frame_skipped": True
+                        }))
+                    else:
+                        # Fall back to regular broadcast
+                        asyncio.create_task(websocket_manager.broadcast_navigation({
+                            "navigation": navigation_guidance,
+                            "timestamp": last_results["timestamp"],
+                            "frame_skipped": True
+                        }))
+                except Exception as e:
+                    logger.error(f"Error broadcasting navigation data on skipped frame: {e}")
+                
+                return last_results
+            
+            # Do full processing for key frames
             # Detect obstacles using YOLOv11
             detections = self.detect_obstacles(frame)
             
@@ -1435,8 +1679,12 @@ class VisionProcessor:
                 },
                 "navigation_guidance": navigation_guidance,
                 "processed_frame": processed_frame,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "frame_skipped": False
             }
+            
+            # Cache results for frame skipping
+            self.last_results = results
             
             return results
             

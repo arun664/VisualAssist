@@ -16,6 +16,12 @@ class WebSocketManager:
         self.active_connections: Dict[str, WebSocket] = {}
         self.connection_counter = 0
         
+        # Custom endpoint handlers
+        self.custom_endpoints = {}
+        
+        # Navigation feed handler (will be set during initialization)
+        self.navigation_feed = None
+        
         # Set up FSM state change callback
         self._setup_fsm_callback()
     
@@ -66,6 +72,75 @@ class WebSocketManager:
         # Clean up disconnected clients
         for client_id in disconnected_clients:
             self.disconnect(client_id)
+            
+    def register_endpoint(self, endpoint_path: str, connect_handler, message_handler):
+        """Register custom WebSocket endpoint handlers"""
+        self.custom_endpoints[endpoint_path] = {
+            "connect_handler": connect_handler,
+            "message_handler": message_handler
+        }
+        logger.info(f"Registered WebSocket endpoint: {endpoint_path}")
+    
+    async def handle_endpoint_connection(self, websocket: WebSocket, path: str):
+        """Handle connection for a specific endpoint"""
+        if path in self.custom_endpoints:
+            # Use the registered handler for this endpoint
+            await self.custom_endpoints[path]["connect_handler"](websocket, path)
+        else:
+            # Default WebSocket connection handling
+            await self.connect(websocket)
+    
+    async def handle_endpoint_message(self, websocket: WebSocket, message: str, path: str):
+        """Handle message for a specific endpoint"""
+        if path in self.custom_endpoints:
+            # Use the registered handler for this endpoint
+            await self.custom_endpoints[path]["message_handler"](websocket, message)
+        else:
+            # Default message handling
+            try:
+                parsed_message = self.parse_message(message)
+                # Process the message using default handler
+            except ValueError as e:
+                logger.error(f"Error parsing message on {path}: {e}")
+    
+    async def broadcast_navigation(self, navigation_data: dict):
+        """Broadcast navigation guidance to connected clients"""
+        if not self.active_connections:
+            return
+            
+        # Format message for WebSocket transmission
+        message = {
+            "type": "navigation_guidance",
+            "guidance": navigation_data.get("navigation", {}),
+            "timestamp": navigation_data.get("timestamp", ""),
+            "client_id": navigation_data.get("client_id", "unknown"),
+            "frame_skipped": navigation_data.get("frame_skipped", False)
+        }
+        
+        # Always include voice guidance for all navigation messages
+        if "navigation_message" in navigation_data.get("navigation", {}):
+            navigation_message = navigation_data["navigation"]["navigation_message"]
+            message["speak"] = navigation_message
+            
+            # Log that we're sending audio message
+            logger.debug(f"Sending audio guidance: {navigation_message}")
+        elif "navigation" in navigation_data:
+            # Ensure every navigation message has voice guidance
+            navigation_guidance = navigation_data.get("navigation", {})
+            if navigation_guidance.get("path_found"):
+                direction = navigation_guidance.get("direction", "forward")
+                message["speak"] = f"Move {direction} along the path."
+            else:
+                message["speak"] = "Looking for a safe path."
+            
+            logger.debug(f"Generated default audio guidance: {message['speak']}")
+        
+        # Broadcast to main WebSocket clients
+        await self.broadcast(message)
+        
+        # Also update navigation feed if it exists
+        if self.navigation_feed:
+            await self.navigation_feed.update_navigation(message)
     
     def parse_message(self, raw_message: str) -> dict:
         """Parse incoming WebSocket message"""

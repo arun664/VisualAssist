@@ -15,6 +15,7 @@ class WebSocketManager {
     constructor(url, onMessage, onStateChange, onConnectionChange) {
         this.url = url;
         this.websocket = null;
+        this.navigationWebsocket = null; // Separate websocket for navigation instructions
         this.onMessage = onMessage;
         this.onStateChange = onStateChange;
         this.onConnectionChange = onConnectionChange;
@@ -23,6 +24,21 @@ class WebSocketManager {
         this.reconnectDelay = 1000; // Start with 1 second
         this.isConnecting = false;
         this.shouldReconnect = true;
+        
+        // Track message statistics for debugging
+        this.messageStats = {
+            total: 0,
+            byType: {},
+            lastMessageTime: null,
+            navigationMessages: 0
+        };
+        
+        // Navigation feed statistics
+        this.navigationStats = {
+            total: 0,
+            lastReceived: null,
+            pingInterval: null
+        };
     }
 
     connect() {
@@ -34,11 +50,35 @@ class WebSocketManager {
         this.onConnectionChange('connecting');
 
         try {
+            // Connect to main WebSocket
             this.websocket = new WebSocket(this.url);
             this.setupEventListeners();
+            
+            // Connect to dedicated navigation WebSocket
+            this.connectToNavigationFeed();
         } catch (error) {
             console.error('WebSocket connection error:', error);
             this.handleConnectionError();
+        }
+    }
+    
+    connectToNavigationFeed() {
+        // Create navigation-specific feed URL based on main URL
+        const baseUrl = this.url.split('/');
+        // Use a separate navigation-specific endpoint
+        const navigationUrl = baseUrl.slice(0, -1).join('/') + '/navigation';
+        
+        console.log('Connecting to navigation feed:', navigationUrl);
+        
+        try {
+            this.navigationWebsocket = new WebSocket(navigationUrl);
+            this.setupNavigationEventListeners();
+            
+            // Start pinging for navigation instructions
+            this.startNavigationPing();
+        } catch (error) {
+            console.error('Navigation WebSocket connection error:', error);
+            // We'll still continue with the main connection even if navigation fails
         }
     }
 
@@ -54,6 +94,25 @@ class WebSocketManager {
         this.websocket.onmessage = (event) => {
             try {
                 const message = JSON.parse(event.data);
+                
+                // Track message statistics
+                this.messageStats.total++;
+                this.messageStats.lastMessageTime = new Date();
+                
+                // Track by message type
+                const messageType = message.type || 'unknown';
+                if (!this.messageStats.byType[messageType]) {
+                    this.messageStats.byType[messageType] = 0;
+                }
+                this.messageStats.byType[messageType]++;
+                
+                // Special tracking for navigation messages
+                if (messageType === 'navigation_guidance') {
+                    this.messageStats.navigationMessages++;
+                    console.log(`Navigation message #${this.messageStats.navigationMessages} received through main channel:`, message);
+                }
+                
+                // Pass to handler
                 this.onMessage(message);
                 
                 // Handle state changes
@@ -61,7 +120,51 @@ class WebSocketManager {
                     this.onStateChange(message.state, message);
                 }
             } catch (error) {
-                console.error('Error parsing WebSocket message:', error);
+                console.error('Error parsing WebSocket message:', error, event.data);
+            }
+        };
+    }
+    
+    setupNavigationEventListeners() {
+        if (!this.navigationWebsocket) {
+            return;
+        }
+        
+        this.navigationWebsocket.onopen = () => {
+            console.log('Navigation feed connected');
+            // Reset navigation-specific reconnect attempts if needed
+            
+            // Start sending periodic pings to request navigation updates
+            this.startNavigationPing();
+        };
+
+        this.navigationWebsocket.onmessage = (event) => {
+            try {
+                const message = JSON.parse(event.data);
+                
+                // Track navigation statistics
+                this.navigationStats.total++;
+                this.navigationStats.lastReceived = new Date();
+                
+                console.log(`Navigation feed message #${this.navigationStats.total} received:`, message);
+                
+                // Always treat messages on this channel as navigation_guidance
+                if (!message.type) {
+                    message.type = 'navigation_guidance';
+                }
+                
+                // Mark message as coming from navigation feed
+                message._fromNavigationFeed = true;
+                
+                // Add timestamp if not present
+                if (!message.timestamp) {
+                    message.timestamp = Date.now();
+                }
+                
+                // Pass to the same handler as other messages
+                this.onMessage(message);
+            } catch (error) {
+                console.error('Error parsing navigation feed message:', error, event.data);
             }
         };
 
@@ -78,6 +181,23 @@ class WebSocketManager {
         this.websocket.onerror = (error) => {
             console.error('WebSocket error:', error);
             this.handleConnectionError();
+        };
+        
+        // Navigation WebSocket error handlers
+        this.navigationWebsocket.onclose = (event) => {
+            console.log('Navigation feed disconnected:', event.code, event.reason);
+            // Stop the ping interval when connection closes
+            this.stopNavigationPing();
+            
+            // Attempt to reconnect the navigation feed separately
+            if (this.shouldReconnect) {
+                setTimeout(() => this.reconnectNavigationFeed(), 3000);
+            }
+        };
+
+        this.navigationWebsocket.onerror = (error) => {
+            console.error('Navigation feed error:', error);
+            // We'll still continue with main connection even if navigation fails
         };
     }
 
@@ -286,15 +406,76 @@ class WebSocketManager {
         }
     }
 
+    startNavigationPing() {
+        // Clear any existing ping interval
+        this.stopNavigationPing();
+        
+        // Create a new ping interval - request navigation updates every 500ms
+        this.navigationStats.pingInterval = setInterval(() => {
+            this.sendNavigationPing();
+        }, 500); // Ping every 500ms for near real-time navigation updates
+        
+        console.log('Navigation ping started - requesting updates every 500ms');
+    }
+    
+    stopNavigationPing() {
+        if (this.navigationStats.pingInterval) {
+            clearInterval(this.navigationStats.pingInterval);
+            this.navigationStats.pingInterval = null;
+            console.log('Navigation ping stopped');
+        }
+    }
+    
+    sendNavigationPing() {
+        if (this.navigationWebsocket && this.navigationWebsocket.readyState === WebSocket.OPEN) {
+            // Simple ping to request the latest navigation data
+            const pingMessage = {
+                type: 'navigation_request',
+                timestamp: Date.now()
+            };
+            
+            try {
+                this.navigationWebsocket.send(JSON.stringify(pingMessage));
+            } catch (error) {
+                console.error('Error sending navigation ping:', error);
+            }
+        }
+    }
+    
+    reconnectNavigationFeed() {
+        console.log('Attempting to reconnect navigation feed...');
+        try {
+            // Close existing connection if any
+            if (this.navigationWebsocket) {
+                this.navigationWebsocket.close();
+            }
+            
+            // Create a new connection
+            this.connectToNavigationFeed();
+        } catch (error) {
+            console.error('Error reconnecting to navigation feed:', error);
+        }
+    }
+
     disconnect() {
         this.shouldReconnect = false;
+        this.stopNavigationPing();
+        
         if (this.websocket) {
             this.websocket.close();
+        }
+        
+        if (this.navigationWebsocket) {
+            this.navigationWebsocket.close();
         }
     }
 
     isConnected() {
         return this.websocket && this.websocket.readyState === WebSocket.OPEN;
+    }
+    
+    isNavigationFeedConnected() {
+        return this.navigationWebsocket && this.navigationWebsocket.readyState === WebSocket.OPEN;
     }
 }
 
@@ -306,9 +487,9 @@ class AudioFeedbackSystem {
         this.urgencyQueue = [];
         this.isSpeaking = false;
         
-        // Rate limiting: only allow audio once every 5 seconds
+        // No rate limiting for real-time navigation guidance
         this.lastAudioTime = 0;
-        this.audioRateLimit = 5000; // 5 seconds in milliseconds
+        this.audioRateLimit = 0; // Disabled rate limiting
         
         if (!this.isSupported) {
             console.warn('Speech Synthesis API not supported in this browser');
@@ -334,20 +515,14 @@ class AudioFeedbackSystem {
             return false;
         }
 
-        // Rate limiting: check if enough time has passed since last audio
+        // No rate limiting - allow all navigation guidance to be spoken immediately
+        // Just log the message timing for debugging
         const currentTime = Date.now();
         const timeSinceLastAudio = currentTime - this.lastAudioTime;
         
-        if (timeSinceLastAudio < this.audioRateLimit) {
-            const remainingTime = this.audioRateLimit - timeSinceLastAudio;
-            console.log(`🔇 Audio rate limited: ${text} (${remainingTime}ms remaining)`);
-            
-            // For emergency messages, override rate limiting
-            if (urgency !== 'emergency') {
-                return false;
-            } else {
-                console.log('🚨 Emergency message overrides rate limiting');
-            }
+        // Log timing information but don't block any messages
+        if (timeSinceLastAudio < 1000) {
+            console.log(`⚡ Rapid audio message: ${text} (${timeSinceLastAudio}ms since last)`);
         }
 
         try {
@@ -383,7 +558,7 @@ class AudioFeedbackSystem {
                 this.urgencyQueue.push({ utterance, urgency, originalText: text });
                 this.processQueue();
             }
-
+                                                                                                                                                                                                                        
             return true;
             
         } catch (error) {
@@ -633,15 +808,13 @@ class AudioFeedbackSystem {
 
         const nextItem = this.urgencyQueue.shift();
         
-        // Check rate limiting for queued items (except emergency)
+        // No rate limiting checks - process all navigation messages immediately
+        // Just log timing for debugging
         const currentTime = Date.now();
         const timeSinceLastAudio = currentTime - this.lastAudioTime;
         
-        if (timeSinceLastAudio < this.audioRateLimit && nextItem.urgency !== 'emergency') {
-            console.log(`🔇 Queued audio rate limited: ${nextItem.originalText}`);
-            // Skip this item and try next one
-            this.processQueue();
-            return;
+        if (timeSinceLastAudio < 500) {
+            console.log(`⚡ Processing rapid queued audio: ${nextItem.originalText} (${timeSinceLastAudio}ms since last)`);
         }
 
         // Set up event handlers for this queued item
@@ -696,10 +869,10 @@ class AudioFeedbackSystem {
     getRateLimitStatus() {
         const currentTime = Date.now();
         const timeSinceLastAudio = currentTime - this.lastAudioTime;
-        const remainingTime = Math.max(0, this.audioRateLimit - timeSinceLastAudio);
+        const remainingTime = 0; // No rate limiting
         
         return {
-            canPlayAudio: timeSinceLastAudio >= this.audioRateLimit,
+            canPlayAudio: true, // Always allow audio to play
             timeSinceLastAudio: timeSinceLastAudio,
             remainingTime: remainingTime,
             rateLimitMs: this.audioRateLimit
@@ -828,32 +1001,44 @@ class VideoDisplayController {
             this.videoElement.parentNode.insertBefore(fallbackImg, this.videoElement.nextSibling);
             
             // Set up a timeout to detect if the stream doesn't load in video element
+            // Increased timeout to 15000ms (15 seconds) to give more time for video loading
+            // Only use fallback for severe latency issues - prevent unnecessary fallback mode
             const loadTimeout = setTimeout(() => {
                 if (!this.isConnected) {
-                    console.warn('Video element not loading MJPEG stream - trying img fallback...');
+                    console.warn('Video element not loading MJPEG stream after extended timeout - trying img fallback...');
                     
-                    // Hide video element and show img element instead
-                    this.videoElement.style.display = 'none';
-                    fallbackImg.style.display = 'block';
+                    // Try to force video element load one more time before falling back
+                    this.videoElement.load();
                     
-                    // Set up img element handlers
-                    fallbackImg.onload = () => {
-                        console.log('MJPEG stream loaded in img fallback');
-                        this.isConnected = true;
-                        this.reconnectAttempts = 0;
-                        this.hideLoadingSpinner();
-                        this.onStatusChange('connected', 'Video stream active (fallback mode)');
-                    };
-                    
-                    fallbackImg.onerror = (error) => {
-                        console.error('Fallback img stream error:', error);
-                        this.handleStreamError();
-                    };
-                    
-                    // Set the source for the fallback img
-                    fallbackImg.src = timestampedUrl;
+                    // Give a bit more time after forced loading
+                    setTimeout(() => {
+                        if (!this.isConnected) {
+                            console.warn('Forced video load failed - switching to fallback mode');
+                            
+                            // Hide video element and show img element instead
+                            this.videoElement.style.display = 'none';
+                            fallbackImg.style.display = 'block';
+                            
+                            // Set up img element handlers
+                            fallbackImg.onload = () => {
+                                console.log('MJPEG stream loaded in img fallback');
+                                this.isConnected = true;
+                                this.reconnectAttempts = 0;
+                                this.hideLoadingSpinner();
+                                this.onStatusChange('connected', 'Video stream active (fallback mode)');
+                            };
+                            
+                            fallbackImg.onerror = (error) => {
+                                console.error('Fallback img stream error:', error);
+                                this.handleStreamError();
+                            };
+                            
+                            // Set the source for the fallback img
+                            fallbackImg.src = timestampedUrl;
+                        }
+                    }, 2000);
                 }
-            }, 3000);
+            }, 15000);
             
             // For video elements with MJPEG streams
             this.videoElement.onloadeddata = () => {
@@ -869,13 +1054,30 @@ class VideoDisplayController {
         // Set the source - this will start the stream
         this.videoElement.src = timestampedUrl;
         
-        console.log('Video element src set to:', timestampedUrl);
+        // Add high quality parameter to ensure best video quality
+        if (this.videoElement.src.includes('?')) {
+            this.videoElement.src += '&quality=high';
+        } else {
+            this.videoElement.src += '?quality=high';
+        }
+        
+        // Set video element attributes for better performance
+        this.videoElement.setAttribute('muted', ''); // Mute any audio
+        this.videoElement.setAttribute('playsinline', ''); // Better mobile support
+        this.videoElement.setAttribute('autoplay', ''); // Ensure autoplay works
+        
+        console.log('Video element src set to:', this.videoElement.src);
         console.log('Video element properties:', {
             src: this.videoElement.src,
             readyState: this.videoElement.readyState,
             networkState: this.videoElement.networkState,
             videoWidth: this.videoElement.videoWidth,
-            videoHeight: this.videoElement.videoHeight
+            videoHeight: this.videoElement.videoHeight,
+            attributes: {
+                autoplay: this.videoElement.hasAttribute('autoplay'),
+                muted: this.videoElement.hasAttribute('muted'),
+                playsinline: this.videoElement.hasAttribute('playsinline')
+            }
         });
     }
 
@@ -1192,15 +1394,44 @@ class NavigationApp {
         );
 
         this.websocketManager.connect();
+        
+        // Display navigation feed status
+        this.updateNavigationFeedStatus();
+        
+        // Periodically update navigation feed status
+        setInterval(() => this.updateNavigationFeedStatus(), 5000);
+    }
+    
+    updateNavigationFeedStatus() {
+        const navFeedConnected = this.websocketManager && this.websocketManager.isNavigationFeedConnected();
+        const navStats = this.websocketManager ? this.websocketManager.navigationStats : null;
+        
+        // Update UI with navigation feed status
+        const navFeedStatus = document.getElementById('navigationFeedStatus');
+        if (navFeedStatus) {
+            if (navFeedConnected) {
+                const lastUpdated = navStats && navStats.lastReceived ? 
+                    `Last update: ${new Date(navStats.lastReceived).toLocaleTimeString()}` : 
+                    'Awaiting data';
+                navFeedStatus.textContent = `Connected (${lastUpdated})`;
+                navFeedStatus.className = 'status-value ready';
+            } else {
+                navFeedStatus.textContent = 'Disconnected';
+                navFeedStatus.className = 'status-value error';
+            }
+        }
     }
 
     handleWebSocketMessage(message) {
         console.log('Received WebSocket message:', message);
         
+        // Track message source
+        const isFromNavigationFeed = message._fromNavigationFeed === true;
+        
         // Handle different message types
         if (message.speak) {
             console.log('Processing speak message:', message.speak);
-            this.handleAudioMessage(message.speak, message.state);
+            this.handleAudioMessage(message.speak, message.state || 'active');
         }
         
         if (message.set_lang) {
@@ -1223,44 +1454,186 @@ class NavigationApp {
             console.log('State change with speak message:', message.speak);
             this.handleAudioMessage(message.speak, message.state);
         }
+        
+        // Handle navigation guidance messages with priority
+        if (message.type === 'navigation_guidance') {
+            const sourceText = isFromNavigationFeed ? 'dedicated navigation feed' : 'main channel';
+            console.log(`Navigation guidance received from ${sourceText}:`, message);
+            
+            // Update navigation feed status if receiving from dedicated feed
+            if (isFromNavigationFeed) {
+                this.updateNavigationFeedStatus();
+            }
+            
+            // Extract the navigation message from different possible locations
+            let navigationText = '';
+            if (message.speak) {
+                navigationText = message.speak;
+            } else if (message.message) {
+                navigationText = message.message;
+            } else if (message.guidance && message.guidance.navigation_message) {
+                navigationText = message.guidance.navigation_message;
+            } else if (message.navigation && message.navigation.navigation_message) {
+                navigationText = message.navigation.navigation_message;
+            }
+            
+            if (navigationText) {
+                console.log('Navigation text to speak:', navigationText);
+                
+                // Determine urgency based on message content
+                let urgency = 'normal';
+                const messageText = navigationText.toLowerCase();
+                
+                if (messageText.includes('obstacle') || messageText.includes('blocked') || messageText.includes('caution')) {
+                    urgency = 'urgent';
+                }
+                
+                if (messageText.includes('emergency') || messageText.includes('danger') || messageText.includes('stop immediately')) {
+                    urgency = 'emergency';
+                }
+                
+                // Play navigation guidance with appropriate urgency
+                this.audioSystem.speak(navigationText, urgency);
+            } else {
+                console.warn('Navigation guidance received without speech text');
+            }
+            
+            // Always update visual guidance if applicable, even without speech
+            this.updateNavigationVisuals(message);
+        }
+    }
+    
+    // Helper method to update visual navigation guidance
+    updateNavigationVisuals(navigationMessage) {
+        console.log('Updating navigation visuals with:', navigationMessage);
+        
+        // Update navigation UI elements with guidance information
+        const navStatus = document.getElementById('navigationStatus');
+        if (!navStatus) {
+            console.warn('Navigation status element not found in DOM');
+            return;
+        }
+        
+        // Check if this is from dedicated navigation feed
+        const isFromNavigationFeed = navigationMessage._fromNavigationFeed === true;
+        const sourceInfo = isFromNavigationFeed ? 
+            '<div class="nav-source">Real-time feed</div>' : '';
+        
+        // Extract guidance data from different possible message formats
+        let guidance = null;
+        
+        if (navigationMessage.guidance) {
+            guidance = navigationMessage.guidance;
+            console.log('Using guidance from message.guidance');
+        } else if (navigationMessage.navigation) {
+            guidance = navigationMessage.navigation;
+            console.log('Using guidance from message.navigation');
+        } else {
+            // Try to construct guidance from individual fields
+            guidance = {
+                path_found: navigationMessage.path_found || false,
+                direction: navigationMessage.direction || 'unknown',
+                navigation_message: navigationMessage.message || navigationMessage.speak || 'No message',
+                timestamp: navigationMessage.timestamp || Date.now()
+            };
+            console.log('Constructed guidance from message fields');
+        }
+        
+        // Add timestamp if not present
+        if (!guidance.timestamp) {
+            guidance.timestamp = Date.now();
+        }
+        
+        // Format timestamp
+        const timestamp = new Date(guidance.timestamp).toLocaleTimeString();
+        
+        // Format and display navigation guidance
+        let statusHTML = '';
+        
+        if (guidance && guidance.path_found) {
+            statusHTML = `
+                <div class="nav-direction">${guidance.direction || 'Forward'}</div>
+                <div class="nav-message">${guidance.navigation_message || 'Follow the path'}</div>
+                <div class="nav-timestamp">${timestamp}</div>
+                ${sourceInfo}
+            `;
+            navStatus.className = 'navigation-status path-found';
+        } else {
+            statusHTML = `
+                <div class="nav-direction warning">No Path</div>
+                <div class="nav-message">${guidance ? guidance.navigation_message : 'Searching for path'}</div>
+                <div class="nav-timestamp">${timestamp}</div>
+                ${sourceInfo}
+            `;
+            navStatus.className = 'navigation-status no-path';
+        }
+        
+        navStatus.innerHTML = statusHTML;
+        
+        // Update timestamp of last navigation update for feed status
+        if (this.websocketManager && this.websocketManager.navigationStats) {
+            this.websocketManager.navigationStats.lastReceived = Date.now();
+        }
+        
+        console.log('Navigation visuals updated');
     }
 
     handleAudioMessage(text, currentState) {
         // Always show visual feedback for monitoring
         this.showVisualFeedback(text, currentState);
         
-        if (!this.audioSystem.isSupported) {
-            console.warn('Audio feedback not available - displaying text instead:', text);
-            this.showTextFallback(text);
-            return;
-        }
+        // Check if we're on the frontend interface (not client)
+        // Only play navigation audio on frontend interface
+        const currentPath = window.location.pathname || '';
+        const isOnFrontend = currentPath.includes('frontend') || 
+                            currentPath === '/' || 
+                            currentPath.includes('index.html') ||
+                            !currentPath.includes('client');
 
-        // Determine urgency based on message content and state
-        let urgency = 'normal';
-        
-        if (currentState === 'blocked' || text.toLowerCase().includes('stop') || text.toLowerCase().includes('danger')) {
-            urgency = 'emergency';
-        } else if (text.toLowerCase().includes('caution') || text.toLowerCase().includes('careful')) {
-            urgency = 'urgent';
-        }
+        if (isOnFrontend) {
+            console.log(`Playing audio on frontend: ${text} (path: ${currentPath})`);
+            
+            if (!this.audioSystem.isSupported) {
+                console.warn('Audio feedback not available - displaying text instead:', text);
+                this.showTextFallback(text);
+                return;
+            }
 
-        // Check rate limit status for debugging
-        const rateLimitStatus = this.audioSystem.getRateLimitStatus();
-        if (!rateLimitStatus.canPlayAudio && urgency !== 'emergency') {
-            console.log(`⏱️ Audio rate limited: ${text} (${Math.ceil(rateLimitStatus.remainingTime/1000)}s remaining)`);
-        }
+            // Determine urgency based on message content and state
+            let urgency = 'normal';
+            
+            // Navigation guidance gets higher priority
+            if (text.toLowerCase().includes('path') || 
+                text.toLowerCase().includes('turn') || 
+                text.toLowerCase().includes('move')) {
+                urgency = 'normal'; // Normal priority for standard navigation
+            }
+            
+            if (currentState === 'blocked' || text.toLowerCase().includes('stop') || text.toLowerCase().includes('danger')) {
+                urgency = 'emergency';
+            } else if (text.toLowerCase().includes('caution') || text.toLowerCase().includes('careful') || 
+                       text.toLowerCase().includes('obstacle') || text.toLowerCase().includes('no clear path')) {
+                urgency = 'urgent';
+            }
 
-        // Speak the message with appropriate urgency (rate limiting handled in AudioFeedbackSystem)
-        const audioPlayed = this.audioSystem.speak(text, urgency);
-        
-        // Also show visual feedback for important messages
-        if (urgency === 'emergency' || urgency === 'urgent') {
-            this.showVisualAlert(text, urgency);
-        }
-        
-        // Show rate limit indicator in UI if audio was blocked
-        if (!audioPlayed && urgency !== 'emergency') {
-            this.showRateLimitIndicator(rateLimitStatus.remainingTime);
+            // Rate limiting removed - just log timing for debugging
+            const rateLimitStatus = this.audioSystem.getRateLimitStatus();
+            console.log(`🔊 Playing audio: ${text} (${rateLimitStatus.timeSinceLastAudio}ms since last message)`);
+
+            // Speak the message with appropriate urgency (no rate limiting)
+            const audioPlayed = this.audioSystem.speak(text, urgency);
+            
+            // Also show visual feedback for important messages
+            if (urgency === 'emergency' || urgency === 'urgent') {
+                this.showVisualAlert(text, urgency);
+            }
+            
+            // Show rate limit indicator in UI if audio was blocked
+            if (!audioPlayed && urgency !== 'emergency') {
+                this.showRateLimitIndicator(rateLimitStatus.remainingTime);
+            }
+        } else {
+            console.log(`Navigation audio suppressed on client: ${text} (path: ${currentPath})`);
         }
     }
     

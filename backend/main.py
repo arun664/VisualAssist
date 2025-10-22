@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import Optional
 import logging
 import asyncio
+import json
 import time
 
 from websocket_manager import websocket_manager
@@ -16,6 +17,7 @@ from navigation_fsm import navigation_fsm, NavigationState
 from computer_vision import get_vision_processor
 from speech_recognition import speech_processor
 from safety_monitor import safety_monitor
+from navigation_feed import NavigationFeed
 
 # Import configuration and logging systems
 from config_manager import get_config
@@ -76,6 +78,16 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Error starting monitoring system: {e}")
     
+    # Initialize navigation feed for dedicated real-time updates
+    try:
+        # Create navigation feed handler
+        navigation_feed = NavigationFeed(websocket_manager)
+        # Store it globally for access from other modules
+        websocket_manager.navigation_feed = navigation_feed
+        logger.info("Navigation feed initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing navigation feed: {e}")
+    
     # Initialize workflow coordinator
     try:
         from workflow_coordinator import workflow_coordinator
@@ -123,12 +135,29 @@ async def startup_event():
         if success:
             logger.info("Speech recognition initialized successfully")
             
-            # Set up FSM state updates for speech recognition
-            def update_speech_recognition_state(message):
-                """Update speech recognition with current FSM state"""
+            # Set up FSM state updates for speech recognition and navigation feed
+            def update_state_handlers(message):
+                """Update speech recognition and navigation feed with current FSM state"""
+                # Update speech recognition
                 speech_processor.set_current_fsm_state(message.state)
+                
+                # Update navigation feed if available
+                if hasattr(websocket_manager, 'navigation_feed') and websocket_manager.navigation_feed:
+                    # Convert navigation message to navigation feed format
+                    navigation_data = {
+                        "type": "navigation_guidance",
+                        "guidance": {
+                            "state": message.state.value,
+                            "path_found": message.state == NavigationState.STATE_GUIDING,
+                            "direction": message.data.get("direction", "unknown") if message.data else "unknown",
+                            "navigation_message": message.speak if message.speak else "No guidance available"
+                        }
+                    }
+                    
+                    # Use a task to send to navigation feed (avoid awaiting in a non-async function)
+                    asyncio.create_task(websocket_manager.navigation_feed.update_navigation(navigation_data))
             
-            navigation_fsm.set_state_change_callback(update_speech_recognition_state)
+            navigation_fsm.set_state_change_callback(update_state_handlers)
             
             # Initialize with current FSM state
             speech_processor.set_current_fsm_state(navigation_fsm.get_current_state())
@@ -254,6 +283,36 @@ async def websocket_endpoint(websocket: WebSocket):
                 
     except WebSocketDisconnect:
         websocket_manager.disconnect(client_id)
+
+@app.websocket("/navigation")
+async def navigation_websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for dedicated navigation feed"""
+    try:
+        # Use navigation feed endpoint handler if available
+        if hasattr(websocket_manager, 'navigation_feed') and websocket_manager.navigation_feed:
+            await websocket_manager.navigation_feed.handle_navigation_client_connected(websocket, "/navigation")
+            
+            # Handle messages from the client
+            while True:
+                raw_message = await websocket.receive_text()
+                await websocket_manager.navigation_feed.handle_navigation_client_message(websocket, raw_message)
+        else:
+            # Fallback to regular WebSocket handling if navigation feed not available
+            await websocket.accept()
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": "Navigation feed not available"
+            }))
+            await websocket.close()
+            
+    except WebSocketDisconnect:
+        logger.info("Navigation feed client disconnected")
+    except Exception as e:
+        logger.error(f"Error in navigation WebSocket handler: {e}")
+        try:
+            await websocket.close()
+        except:
+            pass
 
 @app.get("/processed_video_stream")
 async def video_stream():

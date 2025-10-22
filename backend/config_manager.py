@@ -119,7 +119,7 @@ class ComputerVisionConfig:
     grid_rows: int = 6
     grid_cols: int = 8
     safety_margin: float = 0.2
-    frame_skip: int = 0
+    frame_skip: int = 1  # Process ~40% of frames (frame_skip=1 processes every other frame)
     
     def __post_init__(self):
         # Validate grid dimensions
@@ -336,7 +336,7 @@ class ConfigManager:
         config.computer_vision.grid_rows = int(os.getenv("CV_GRID_ROWS", config.computer_vision.grid_rows))
         config.computer_vision.grid_cols = int(os.getenv("CV_GRID_COLS", config.computer_vision.grid_cols))
         config.computer_vision.safety_margin = float(os.getenv("CV_SAFETY_MARGIN", config.computer_vision.safety_margin))
-        config.computer_vision.frame_skip = int(os.getenv("CV_FRAME_SKIP", config.computer_vision.frame_skip))
+        config.computer_vision.frame_skip = int(os.getenv("CV_FRAME_SKIP", 1))  # Set default frame_skip to 1 to optimize processing
         
         # Audio configuration
         config.audio.buffer_size = int(os.getenv("AUDIO_BUFFER_SIZE", config.audio.buffer_size))
