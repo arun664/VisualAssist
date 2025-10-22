@@ -140,6 +140,48 @@ class NavigationClient {
         this.setupEventListeners();
         this.updateAllStatuses();
         this.checkBiometricAvailability();
+        this.setupMixedContentHandling();
+    }
+
+    setupMixedContentHandling() {
+        // Check if we're on HTTPS and need to handle Mixed Content
+        if (window.AI_NAV_CONFIG && window.AI_NAV_CONFIG.isHttpsPage()) {
+            console.warn('🔒 HTTPS page detected - Mixed Content may be blocked');
+            this.setupMixedContentWarning();
+        }
+    }
+
+    setupMixedContentWarning() {
+        const dismissBtn = document.getElementById('dismissWarningBtn');
+        const retryBtn = document.getElementById('retryConnectionBtn');
+        
+        if (dismissBtn) {
+            dismissBtn.addEventListener('click', () => {
+                this.hideMixedContentWarning();
+            });
+        }
+        
+        if (retryBtn) {
+            retryBtn.addEventListener('click', () => {
+                this.hideMixedContentWarning();
+                // Try to connect again
+                this.connectToServer();
+            });
+        }
+    }
+
+    showMixedContentWarning() {
+        const warning = document.getElementById('mixedContentWarning');
+        if (warning) {
+            warning.classList.remove('hidden');
+        }
+    }
+
+    hideMixedContentWarning() {
+        const warning = document.getElementById('mixedContentWarning');
+        if (warning) {
+            warning.classList.add('hidden');
+        }
     }
 
     checkBrowserSupport() {
@@ -288,6 +330,14 @@ class NavigationClient {
             }
             
         } catch (error) {
+            // Check if this is a Mixed Content error
+            if (error.message.includes('Mixed Content') || 
+                error.message.includes('blocked') || 
+                error.message.includes('HTTPS') ||
+                (window.AI_NAV_CONFIG && window.AI_NAV_CONFIG.isHttpsPage() && error.name === 'TypeError')) {
+                console.error('Mixed Content error detected:', error);
+                this.showMixedContentWarning();
+            }
             throw new Error('Failed to create WebRTC offer: ' + error.message);
         }
     }
@@ -938,7 +988,16 @@ class NavigationClient {
             this.updateConnectButtonState();
             
         } catch (error) {
-            this.showError('Failed to connect to server: ' + error.message);
+            // Check if this is a Mixed Content error
+            if (error.message.includes('Mixed Content') || 
+                error.message.includes('blocked') || 
+                error.message.includes('HTTPS') ||
+                (window.AI_NAV_CONFIG && window.AI_NAV_CONFIG.isHttpsPage() && error.name === 'TypeError')) {
+                console.error('Mixed Content error in server connection:', error);
+                this.showMixedContentWarning();
+            } else {
+                this.showError('Failed to connect to server: ' + error.message);
+            }
             this.updateConnectionStatus('Connection failed');
             document.getElementById('connectionIndicator').className = 'status-indicator error';
             this.updateConnectButtonState();
