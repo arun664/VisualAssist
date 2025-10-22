@@ -45,10 +45,11 @@
 
         <!-- Step 1: Connection Management -->
         <div class="connection-section">
-            <h3>Step 1: Connect to Backend Server (Optional)</h3>
+            <h3>Step 1: Backend Connection</h3>
+            <div id="backendDetectionStatus"></div>
             <div class="server-config">
                 <label for="serverUrl">Backend Server URL:</label>
-                <input type="text" id="serverUrl" value="" placeholder="Backend URL will be auto-detected">
+                <input type="text" id="serverUrl" value="" placeholder="Auto-detecting backend server...">
             </div>
             <div class="connection-controls">
                 <button id="connectBtn" class="control-btn connect-btn" disabled>

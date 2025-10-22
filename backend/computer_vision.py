@@ -104,22 +104,22 @@ class VisionProcessor:
             
             # Verify model loaded successfully
             if self.yolo_model is not None:
-                logger.info("✅ YOLOv11 pretrained model loaded successfully")
+                logger.info("[OK] YOLOv11 pretrained model loaded successfully")
                 # Log model information
-                logger.info(f"📊 Model classes: {len(self.yolo_model.names)} classes")
-                logger.info(f"🖥️ Model device: {self.yolo_model.device}")
-                logger.info(f"📦 Model name: {self.model_name}")
+                logger.info(f"[INFO] Model classes: {len(self.yolo_model.names)} classes")
+                logger.info(f"[INFO] Model device: {self.yolo_model.device}")
+                logger.info(f"[INFO] Model name: {self.model_name}")
                 
                 # Log some example classes for navigation
                 example_classes = []
                 for class_id, class_name in list(self.yolo_model.names.items())[:10]:
                     example_classes.append(f"{class_id}:{class_name}")
-                logger.info(f"🏷️ Example classes: {', '.join(example_classes)}")
+                logger.info(f"[INFO] Example classes: {', '.join(example_classes)}")
                 
                 # Test model with dummy input to ensure it's working
                 test_frame = np.zeros((480, 640, 3), dtype=np.uint8)
                 test_results = self.yolo_model(test_frame, verbose=False)
-                logger.info("✅ YOLOv11 model test inference successful")
+                logger.info("[OK] YOLOv11 model test inference successful")
                 
             else:
                 raise RuntimeError("Failed to load YOLOv11 pretrained model")

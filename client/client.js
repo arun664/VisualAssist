@@ -85,6 +85,94 @@ class NavigationClient {
         this.hideAuthModal();
         this.initializeApp();
         this.setupAuthEventListeners();
+        
+        // Automatically detect and connect to backend
+        this.autoDetectAndConnectBackend();
+    }
+
+    async autoDetectAndConnectBackend() {
+        console.log('🔍 Auto-detecting backend server...');
+        
+        // Possible backend URLs to try
+        const backendUrls = [
+            'http://localhost:8000',
+            'http://127.0.0.1:8000',
+            window.AI_NAV_CONFIG?.getBackendUrl?.() || null,
+            window.AI_NAV_CONFIG?.getDirectBackendUrl?.() || null
+        ].filter(url => url && url.trim()); // Remove null/empty values
+        
+        for (const url of backendUrls) {
+            try {
+                console.log(`Testing backend at: ${url}`);
+                
+                const response = await fetch(`${url}/health`, {
+                    method: 'GET',
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true'
+                    },
+                    timeout: 3000
+                });
+                
+                if (response.ok) {
+                    const healthData = await response.json();
+                    console.log(`✅ Backend found at: ${url}`, healthData);
+                    
+                    // Update the server URL input and connect
+                    document.getElementById('serverUrl').value = url;
+                    this.updateConnectButtonState();
+                    
+                    // Show backend connection status
+                    this.showBackendDetectionResult(url, healthData);
+                    
+                    // Automatically connect
+                    await this.connectToServer();
+                    return; // Stop trying other URLs
+                }
+            } catch (error) {
+                console.log(`❌ Backend not available at: ${url} - ${error.message}`);
+            }
+        }
+        
+        // No backend found
+        console.log('⚠️ No backend server detected');
+        this.showBackendDetectionResult(null, null);
+    }
+
+    showBackendDetectionResult(url, healthData) {
+        const statusElement = document.getElementById('backendDetectionStatus');
+        if (!statusElement) {
+            // Create status element if it doesn't exist
+            const connectionSection = document.querySelector('.connection-section');
+            const statusDiv = document.createElement('div');
+            statusDiv.id = 'backendDetectionStatus';
+            statusDiv.style.cssText = `
+                margin: 10px 0;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 14px;
+            `;
+            connectionSection.appendChild(statusDiv);
+        }
+        
+        const statusEl = document.getElementById('backendDetectionStatus');
+        
+        if (url && healthData) {
+            statusEl.innerHTML = `
+                <div style="background: #d4edda; color: #155724; padding: 10px; border-radius: 5px;">
+                    ✅ <strong>Backend Auto-Detected</strong><br>
+                    URL: ${url}<br>
+                    Status: ${healthData.status || 'Running'}<br>
+                    Version: ${healthData.version || 'Unknown'}
+                </div>
+            `;
+        } else {
+            statusEl.innerHTML = `
+                <div style="background: #fff3cd; color: #856404; padding: 10px; border-radius: 5px;">
+                    ⚠️ <strong>No Backend Detected</strong><br>
+                    You can still use local preview mode, or manually enter a backend URL above.
+                </div>
+            `;
+        }
     }
 
     showAuthModal() {
@@ -166,9 +254,17 @@ class NavigationClient {
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' },
                 { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' }
+                { urls: 'stun:stun4.l.google.com:19302' },
+                // Add more public STUN servers for redundancy
+                { urls: 'stun:stun.stunprotocol.org:3478' },
+                { urls: 'stun:stun.services.mozilla.com' }
             ],
-            iceCandidatePoolSize: 10
+            iceCandidatePoolSize: 10,
+            // Optimize for better connectivity
+            bundlePolicy: 'balanced',
+            rtcpMuxPolicy: 'require',
+            // Enable more aggressive ICE gathering
+            iceTransportPolicy: 'all'
         };
         
         this.peerConnection = new RTCPeerConnection(configuration);
@@ -228,6 +324,50 @@ class NavigationClient {
                     this.updateStreamStatus('Streaming to backend');
                     this.reconnectAttempts = 0; // Reset on successful connection
                     console.log('✅ WebRTC connection established - now streaming to backend');
+                    
+                    // Log media streaming statistics
+                    setTimeout(() => {
+                        this.peerConnection.getStats().then(stats => {
+                            let videoTrackSent = false;
+                            let audioTrackSent = false;
+                            let videoStats = {};
+                            let audioStats = {};
+                            
+                            stats.forEach(report => {
+                                if (report.type === 'outbound-rtp') {
+                                    if (report.mediaType === 'video') {
+                                        videoTrackSent = true;
+                                        videoStats = {
+                                            packetsSent: report.packetsSent,
+                                            bytesSent: report.bytesSent,
+                                            framesSent: report.framesSent,
+                                            framesPerSecond: report.framesPerSecond
+                                        };
+                                    } else if (report.mediaType === 'audio') {
+                                        audioTrackSent = true;
+                                        audioStats = {
+                                            packetsSent: report.packetsSent,
+                                            bytesSent: report.bytesSent
+                                        };
+                                    }
+                                }
+                            });
+                            
+                            console.log('📊 Media streaming status:', {
+                                videoSending: videoTrackSent,
+                                audioSending: audioTrackSent,
+                                videoStats: videoStats,
+                                audioStats: audioStats
+                            });
+                            
+                            if (!videoTrackSent || !audioTrackSent) {
+                                console.warn('⚠️ Media not being sent properly:', {
+                                    video: videoTrackSent ? 'OK' : 'NOT SENDING',
+                                    audio: audioTrackSent ? 'OK' : 'NOT SENDING'
+                                });
+                            }
+                        });
+                    }, 2000); // Check stats after 2 seconds
                     break;
                     
                 case 'connecting':
@@ -303,47 +443,144 @@ class NavigationClient {
         console.log('🔍 Testing WebRTC connectivity...');
         
         try {
-            // Create a test peer connection with the same configuration
+            // Enhanced ICE servers configuration for better connectivity
             const testConfig = {
                 iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' }
-                ]
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' },
+                    { urls: 'stun:stun4.l.google.com:19302' },
+                    // Add more public STUN servers for redundancy
+                    { urls: 'stun:stun.stunprotocol.org:3478' },
+                    { urls: 'stun:stun.services.mozilla.com' }
+                ],
+                iceCandidatePoolSize: 10,
+                // Optimize for better connectivity
+                bundlePolicy: 'balanced',
+                rtcpMuxPolicy: 'require'
             };
             
             const testPC = new RTCPeerConnection(testConfig);
+            let candidatesReceived = 0;
+            let hasHostCandidate = false;
+            let hasSrflxCandidate = false;
             
-            // Create a data channel to test connectivity
-            const dataChannel = testPC.createDataChannel('test');
+            // Track ICE candidates as they arrive
+            testPC.onicecandidate = (event) => {
+                if (event.candidate) {
+                    candidatesReceived++;
+                    const candidate = event.candidate.candidate;
+                    
+                    // Check for different types of candidates
+                    if (candidate.includes('typ host')) {
+                        hasHostCandidate = true;
+                        console.log('✅ Host candidate found (local network)');
+                    } else if (candidate.includes('typ srflx')) {
+                        hasSrflxCandidate = true;
+                        console.log('✅ Server reflexive candidate found (through STUN)');
+                    }
+                    
+                    console.log(`ICE candidate #${candidatesReceived}:`, candidate.substring(0, 60) + '...');
+                }
+            };
+            
+            // Create a data channel to ensure ICE gathering
+            const dataChannel = testPC.createDataChannel('connectivity-test', {
+                ordered: true
+            });
             
             // Create an offer to trigger ICE gathering
-            const offer = await testPC.createOffer();
+            const offer = await testPC.createOffer({
+                offerToReceiveAudio: false,
+                offerToReceiveVideo: false
+            });
             await testPC.setLocalDescription(offer);
             
-            // Wait for ICE gathering to complete or timeout
+            // Enhanced ICE gathering with multiple conditions
             const iceGatheringPromise = new Promise((resolve, reject) => {
+                // Reduced timeout for faster feedback but allow some flexibility
                 const timeout = setTimeout(() => {
-                    reject(new Error('ICE gathering timeout'));
-                }, 10000);
+                    if (candidatesReceived > 0) {
+                        console.log(`⚠️ ICE gathering timeout reached, but ${candidatesReceived} candidates were found`);
+                        resolve(testPC.localDescription);
+                    } else {
+                        reject(new Error('ICE gathering timeout - no candidates found'));
+                    }
+                }, 8000); // Reduced from 10s to 8s
                 
+                // Track ICE gathering state changes
                 testPC.onicegatheringstatechange = () => {
-                    if (testPC.iceGatheringState === 'complete') {
+                    const state = testPC.iceGatheringState;
+                    console.log(`ICE gathering state: ${state}`);
+                    
+                    if (state === 'complete') {
                         clearTimeout(timeout);
+                        console.log('✅ ICE gathering completed normally');
                         resolve(testPC.localDescription);
                     }
                 };
+                
+                // Alternative completion check - if we get good candidates early
+                const candidateCheckInterval = setInterval(() => {
+                    if (candidatesReceived >= 2 && hasHostCandidate) {
+                        clearTimeout(timeout);
+                        clearInterval(candidateCheckInterval);
+                        console.log('✅ Sufficient ICE candidates found early');
+                        resolve(testPC.localDescription);
+                    }
+                }, 1000);
+                
+                // Clean up interval if we timeout or complete normally
+                setTimeout(() => clearInterval(candidateCheckInterval), 8000);
             });
             
             const localDesc = await iceGatheringPromise;
             const candidateCount = (localDesc.sdp.match(/a=candidate/g) || []).length;
             
+            // Analyze connectivity quality
+            let connectivityQuality = 'unknown';
+            if (hasHostCandidate && hasSrflxCandidate) {
+                connectivityQuality = 'excellent';
+            } else if (hasHostCandidate || hasSrflxCandidate) {
+                connectivityQuality = 'good';
+            } else if (candidatesReceived > 0) {
+                connectivityQuality = 'limited';
+            } else {
+                connectivityQuality = 'poor';
+            }
+            
             console.log(`✅ WebRTC connectivity test passed - ${candidateCount} ICE candidates found`);
+            console.log(`📊 Connectivity quality: ${connectivityQuality}`);
+            console.log(`📈 Candidates: ${candidatesReceived} received, Host: ${hasHostCandidate}, STUN: ${hasSrflxCandidate}`);
+            
             testPC.close();
             
-            return { success: true, candidateCount };
+            return { 
+                success: true, 
+                candidateCount,
+                connectivityQuality,
+                hasHostCandidate,
+                hasSrflxCandidate,
+                candidatesReceived
+            };
             
         } catch (error) {
             console.error('❌ WebRTC connectivity test failed:', error);
-            return { success: false, error: error.message };
+            
+            // Provide more specific error guidance
+            let errorGuidance = '';
+            if (error.message.includes('timeout')) {
+                errorGuidance = 'Network/firewall may be blocking STUN servers. Try: 1) Check firewall settings, 2) Try different network, 3) Contact network administrator.';
+            } else if (error.message.includes('no candidates')) {
+                errorGuidance = 'No ICE candidates found. This usually indicates severe network restrictions or lack of internet connectivity.';
+            }
+            
+            return { 
+                success: false, 
+                error: error.message,
+                guidance: errorGuidance
+            };
         }
     }
 
@@ -364,6 +601,16 @@ class NavigationClient {
             });
             
             await this.peerConnection.setLocalDescription(offer);
+            
+            // Debug: Log SDP content to verify media tracks are included
+            console.log('Offer SDP contains:');
+            console.log('- Video tracks:', (offer.sdp.match(/m=video/g) || []).length);
+            console.log('- Audio tracks:', (offer.sdp.match(/m=audio/g) || []).length);
+            console.log('- Video codecs:', offer.sdp.includes('H264') ? 'H264' : 'Other');
+            console.log('- Audio codecs:', offer.sdp.includes('opus') ? 'Opus' : 'Other');
+            
+            // Log first 200 chars of SDP for debugging
+            console.log('SDP preview:', offer.sdp.substring(0, 200) + '...');
             
             // Send offer to server via HTTP POST (not WebSocket)
             const serverUrl = document.getElementById('serverUrl').value.trim();
@@ -767,7 +1014,48 @@ class NavigationClient {
         // WebRTC connectivity test button
         const testWebRTCBtn = document.getElementById('testWebRTCBtn');
         if (testWebRTCBtn) {
-            testWebRTCBtn.addEventListener('click', () => this.testWebRTCConnectivity());
+            testWebRTCBtn.addEventListener('click', async () => {
+                // Disable button during test
+                testWebRTCBtn.disabled = true;
+                testWebRTCBtn.textContent = 'Testing Connectivity...';
+                
+                try {
+                    const result = await this.testWebRTCConnectivity();
+                    
+                    if (result.success) {
+                        // Show success message with details
+                        const qualityEmoji = {
+                            'excellent': '🟢',
+                            'good': '🟡', 
+                            'limited': '🟠',
+                            'poor': '🔴',
+                            'unknown': '⚪'
+                        };
+                        
+                        const emoji = qualityEmoji[result.connectivityQuality] || '⚪';
+                        const message = `${emoji} WebRTC connectivity test passed!\n\n` +
+                                      `Quality: ${result.connectivityQuality}\n` +
+                                      `ICE candidates: ${result.candidateCount}\n` +
+                                      `Local network: ${result.hasHostCandidate ? 'Yes' : 'No'}\n` +
+                                      `STUN server: ${result.hasSrflxCandidate ? 'Yes' : 'No'}`;
+                        
+                        this.showConnectivityTestResult(message, 'success');
+                    } else {
+                        // Show failure message with guidance
+                        const message = `❌ WebRTC connectivity test failed!\n\n` +
+                                      `Error: ${result.error}\n\n` +
+                                      `${result.guidance || 'Check your network connection and firewall settings.'}`;
+                        
+                        this.showConnectivityTestResult(message, 'error');
+                    }
+                } catch (error) {
+                    this.showError('Connectivity test failed: ' + error.message);
+                } finally {
+                    // Re-enable button
+                    testWebRTCBtn.disabled = false;
+                    testWebRTCBtn.textContent = 'Test WebRTC Connectivity';
+                }
+            });
         }
         
         // Server URL input
@@ -1047,6 +1335,8 @@ class NavigationClient {
         console.log('Camera enabled:', this.cameraEnabled);
         console.log('Mic enabled:', this.micEnabled);
         console.log('Is connected:', this.isConnected);
+        console.log('Video stream tracks:', this.videoStream ? this.videoStream.getTracks().length : 0);
+        console.log('Audio stream tracks:', this.audioStream ? this.audioStream.getTracks().length : 0);
         
         if (!this.cameraEnabled || !this.micEnabled) {
             this.showError('Both camera and microphone must be enabled before streaming');
@@ -1100,18 +1390,34 @@ class NavigationClient {
             console.log('Setting up WebRTC connection...');
             this.updateStreamStatus('Setting up WebRTC...');
             
-            // Test WebRTC connectivity first
+            // Test WebRTC connectivity first (but be more lenient)
             console.log('Testing WebRTC connectivity before establishing connection...');
+            this.updateStreamStatus('Testing WebRTC connectivity...');
+            
             const connectivityTest = await this.testWebRTCConnectivity();
             
             if (!connectivityTest.success) {
-                this.showError(`WebRTC connectivity test failed: ${connectivityTest.error}. Check network/firewall settings.`);
-                this.updateStreamStatus('WebRTC connectivity failed');
-                document.getElementById('streamIndicator').className = 'status-indicator error';
-                return;
+                const errorMsg = `WebRTC connectivity test failed: ${connectivityTest.error}`;
+                const guidance = connectivityTest.guidance || 'Check network/firewall settings.';
+                
+                console.warn(`⚠️ ${errorMsg}`);
+                
+                // Show warning but try to continue anyway (more lenient approach)
+                this.showError(`WebRTC connectivity issue detected: ${connectivityTest.error}. Attempting connection anyway...`);
+                this.updateStreamStatus('WebRTC connectivity limited - attempting connection...');
+                
+                // Continue with WebRTC setup despite connectivity issues
+                console.log('Continuing with WebRTC setup despite connectivity issues...');
+            } else {
+                // Log connectivity quality for debugging
+                console.log(`✅ WebRTC connectivity OK (${connectivityTest.candidateCount} ICE candidates, quality: ${connectivityTest.connectivityQuality})`);
+                
+                // Show warning if connectivity quality is poor but continue
+                if (connectivityTest.connectivityQuality === 'limited' || connectivityTest.connectivityQuality === 'poor') {
+                    console.warn('⚠️ Limited WebRTC connectivity detected - connection may be unstable');
+                    this.showError('Limited network connectivity detected - WebRTC connection may be unstable but will attempt connection.');
+                }
             }
-            
-            console.log(`✅ WebRTC connectivity OK (${connectivityTest.candidateCount} ICE candidates)`);
             
             // Add a small delay to ensure backend is ready for WebRTC
             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -1124,9 +1430,21 @@ class NavigationClient {
             
             // Add stream to peer connection
             console.log('Adding tracks to peer connection...');
-            this.localStream.getTracks().forEach(track => {
-                console.log('Adding track:', track.kind);
+            console.log('Local stream has', this.localStream.getTracks().length, 'tracks:');
+            this.localStream.getTracks().forEach((track, index) => {
+                console.log(`Track ${index}: ${track.kind} - enabled: ${track.enabled} - readyState: ${track.readyState}`);
                 this.peerConnection.addTrack(track, this.localStream);
+            });
+            
+            // Verify tracks were added to peer connection
+            const senders = this.peerConnection.getSenders();
+            console.log('Peer connection now has', senders.length, 'senders');
+            senders.forEach((sender, index) => {
+                if (sender.track) {
+                    console.log(`Sender ${index}: ${sender.track.kind} track - enabled: ${sender.track.enabled}`);
+                } else {
+                    console.log(`Sender ${index}: No track`);
+                }
             });
             
             // Create and send offer
@@ -1318,6 +1636,246 @@ class NavigationClient {
             isConnected: this.isConnected,
             disabled: connectBtn.disabled
         });
+    }
+
+    showConnectivityTestResult(message, type) {
+        // Create a modal dialog for test results
+        const resultDialog = document.createElement('div');
+        resultDialog.className = 'connectivity-test-dialog';
+        resultDialog.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border: 3px solid ${type === 'success' ? '#4CAF50' : '#f44336'};
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            z-index: 2000;
+            max-width: 400px;
+            font-family: monospace;
+            white-space: pre-line;
+        `;
+        
+        resultDialog.innerHTML = `
+            <h3 style="color: ${type === 'success' ? '#4CAF50' : '#f44336'}; margin-top: 0;">
+                WebRTC Connectivity Test
+            </h3>
+            <div style="text-align: left; margin: 15px 0; line-height: 1.6;">
+                ${message}
+            </div>
+            <div style="margin-top: 20px; text-align: center;">
+                <button id="closeTestResult" style="background: ${type === 'success' ? '#4CAF50' : '#f44336'}; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
+                    Close
+                </button>
+                ${type === 'error' ? `
+                <button id="showTroubleshooting" style="background: #2196F3; color: white; border: none; padding: 10px 20px; border-radius: 5px; margin-left: 10px; cursor: pointer;">
+                    Troubleshooting Tips
+                </button>
+                ` : ''}
+            </div>
+        `;
+        
+        document.body.appendChild(resultDialog);
+        
+        // Add event listeners
+        document.getElementById('closeTestResult').onclick = () => {
+            document.body.removeChild(resultDialog);
+        };
+        
+        if (type === 'error') {
+            const troubleshootingBtn = document.getElementById('showTroubleshooting');
+            if (troubleshootingBtn) {
+                troubleshootingBtn.onclick = () => {
+                    this.showTroubleshootingTips();
+                    document.body.removeChild(resultDialog);
+                };
+            }
+        }
+    }
+
+    showWebRTCFailureOptions(errorMsg, guidance) {
+        const optionsDialog = document.createElement('div');
+        optionsDialog.className = 'webrtc-failure-dialog';
+        optionsDialog.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border: 3px solid #ff9800;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            z-index: 2000;
+            max-width: 450px;
+        `;
+        
+        optionsDialog.innerHTML = `
+            <h3 style="color: #ff9800; margin-top: 0;">⚠️ WebRTC Connection Failed</h3>
+            <p style="margin: 15px 0;">
+                <strong>Issue:</strong> ${errorMsg}<br>
+                <strong>Suggestion:</strong> ${guidance}
+            </p>
+            <p style="margin: 15px 0;">
+                <strong>Available Options:</strong>
+            </p>
+            <div style="margin: 15px 0;">
+                <button id="continueLocalOnly" style="background: #4CAF50; color: white; border: none; padding: 10px 15px; border-radius: 5px; margin: 5px; cursor: pointer; width: 100%;">
+                    📹 Continue with Local Preview Only
+                </button>
+                <button id="retryWebRTC" style="background: #2196F3; color: white; border: none; padding: 10px 15px; border-radius: 5px; margin: 5px; cursor: pointer; width: 100%;">
+                    🔄 Retry WebRTC Connection
+                </button>
+                <button id="showNetworkTips" style="background: #ff9800; color: white; border: none; padding: 10px 15px; border-radius: 5px; margin: 5px; cursor: pointer; width: 100%;">
+                    🛠️ Show Network Troubleshooting
+                </button>
+                <button id="cancelStreaming" style="background: #757575; color: white; border: none; padding: 10px 15px; border-radius: 5px; margin: 5px; cursor: pointer; width: 100%;">
+                    ❌ Cancel Streaming
+                </button>
+            </div>
+        `;
+        
+        document.body.appendChild(optionsDialog);
+        
+        // Add event listeners
+        document.getElementById('continueLocalOnly').onclick = () => {
+            document.body.removeChild(optionsDialog);
+            console.log('User chose to continue with local preview only');
+            // Don't start WebRTC, just keep local streams active
+        };
+        
+        document.getElementById('retryWebRTC').onclick = async () => {
+            document.body.removeChild(optionsDialog);
+            console.log('User chose to retry WebRTC connection');
+            
+            // Update status and retry
+            this.updateStreamStatus('Retrying WebRTC connection...');
+            
+            try {
+                // Retry the WebRTC setup process
+                await this.continueWithWebRTCSetup();
+            } catch (error) {
+                this.showError('WebRTC retry failed: ' + error.message);
+                this.updateStreamStatus('WebRTC retry failed - local preview only');
+            }
+        };
+        
+        document.getElementById('showNetworkTips').onclick = () => {
+            document.body.removeChild(optionsDialog);
+            this.showTroubleshootingTips();
+        };
+        
+        document.getElementById('cancelStreaming').onclick = () => {
+            document.body.removeChild(optionsDialog);
+            console.log('User cancelled streaming');
+            this.stopStreaming();
+        };
+    }
+
+    async continueWithWebRTCSetup() {
+        // This method continues with the WebRTC setup process
+        // after the initial local stream is established
+        
+        console.log('Continuing with WebRTC setup...');
+        
+        // Create WebRTC peer connection if not exists
+        if (!this.peerConnection) {
+            console.log('Creating peer connection...');
+            await this.createPeerConnection();
+        }
+        
+        // Add stream to peer connection
+        console.log('Adding tracks to peer connection...');
+        if (this.localStream) {
+            this.localStream.getTracks().forEach(track => {
+                console.log('Adding track:', track.kind);
+                this.peerConnection.addTrack(track, this.localStream);
+            });
+        }
+        
+        // Create and send offer
+        console.log('Creating and sending WebRTC offer...');
+        this.updateStreamStatus('Establishing WebRTC connection...');
+        await this.createAndSendOffer();
+        
+        console.log('✅ WebRTC setup continued successfully');
+    }
+
+    showTroubleshootingTips() {
+        const tipsDialog = document.createElement('div');
+        tipsDialog.className = 'troubleshooting-dialog';
+        tipsDialog.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border: 2px solid #2196F3;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            z-index: 2000;
+            max-width: 500px;
+            max-height: 70vh;
+            overflow-y: auto;
+        `;
+        
+        tipsDialog.innerHTML = `
+            <h3 style="color: #2196F3; margin-top: 0;">🔧 WebRTC Troubleshooting Tips</h3>
+            <div style="text-align: left;">
+                <h4>Common Issues & Solutions:</h4>
+                <ul>
+                    <li><strong>ICE Gathering Timeout:</strong>
+                        <ul>
+                            <li>Check if your firewall is blocking UDP traffic on ports 3478, 19302</li>
+                            <li>Try disabling Windows Firewall temporarily</li>
+                            <li>Switch to a different network (mobile hotspot, different WiFi)</li>
+                        </ul>
+                    </li>
+                    <li><strong>Corporate/Restricted Networks:</strong>
+                        <ul>
+                            <li>Contact your network administrator about WebRTC/STUN server access</li>
+                            <li>Request firewall exceptions for STUN servers</li>
+                            <li>Consider using a VPN</li>
+                        </ul>
+                    </li>
+                    <li><strong>Browser Issues:</strong>
+                        <ul>
+                            <li>Try a different browser (Chrome, Firefox, Edge)</li>
+                            <li>Clear browser cache and cookies</li>
+                            <li>Disable browser extensions temporarily</li>
+                        </ul>
+                    </li>
+                    <li><strong>Network Debugging:</strong>
+                        <ul>
+                            <li>Test internet connectivity</li>
+                            <li>Check if STUN servers are reachable: ping stun.l.google.com</li>
+                            <li>Try running from localhost vs remote server</li>
+                        </ul>
+                    </li>
+                </ul>
+                
+                <h4>Advanced Solutions:</h4>
+                <ul>
+                    <li>Configure TURN servers for NAT traversal</li>
+                    <li>Use fallback to WebSocket streaming</li>
+                    <li>Consider using a different WebRTC signaling approach</li>
+                </ul>
+            </div>
+            <div style="margin-top: 20px; text-align: center;">
+                <button id="closeTroubleshooting" style="background: #2196F3; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
+                    Close
+                </button>
+            </div>
+        `;
+        
+        document.body.appendChild(tipsDialog);
+        
+        document.getElementById('closeTroubleshooting').onclick = () => {
+            document.body.removeChild(tipsDialog);
+        };
     }
 
     showError(message) {

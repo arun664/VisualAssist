@@ -305,18 +305,20 @@ class WebRTCConnectionManager:
     
     def _handle_video_track(self, track: MediaStreamTrack, client_id: str):
         """Handle incoming video track"""
-        logger.info(f"Setting up video track handler for {client_id}")
+        logger.info(f"🎥 Setting up video track handler for {client_id}")
+        logger.info(f"Video track details - Kind: {track.kind}, ReadyState: {track.readyState}")
         
         # Create async task to process video frames
         asyncio.create_task(self._process_video_frames(track, client_id))
-    
+
     def _handle_audio_track(self, track: MediaStreamTrack, client_id: str):
         """Handle incoming audio track"""
-        logger.info(f"Setting up audio track handler for {client_id}")
+        logger.info(f"🎤 Setting up audio track handler for {client_id}")
+        logger.info(f"Audio track details - Kind: {track.kind}, ReadyState: {track.readyState}")
         
         # Create async task to process audio frames
         asyncio.create_task(self._process_audio_frames(track, client_id))
-    
+
     async def _process_video_frames(self, track: MediaStreamTrack, client_id: str):
         """Process incoming video frames with parallel processing and safety monitoring"""
         try:
@@ -339,7 +341,7 @@ class WebRTCConnectionManager:
                 
                 try:
                     frame = await track.recv()
-                    logger.debug(f"Received video frame from {client_id}: {frame.width}x{frame.height}")
+                    logger.info(f"📹 Received video frame from {client_id} at {time.time():.2f}")
                     
                     # Reset error count on successful frame reception
                     if self.video_error_counts.get(client_id, 0) > 0:
