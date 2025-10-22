@@ -259,6 +259,7 @@ class NavigationClient {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'ngrok-skip-browser-warning': 'true'
                 },
                 body: JSON.stringify({
                     client_id: this.clientId,
@@ -911,6 +912,7 @@ class NavigationClient {
             
             // Test server connectivity with a simple HTTP request
             const testUrl = serverUrl.replace(/\/$/, '') + '/health';
+            console.log('Testing server connectivity at:', testUrl);
             
             // Create a timeout promise
             const timeoutPromise = new Promise((_, reject) => {
@@ -919,12 +921,27 @@ class NavigationClient {
             
             // Race between fetch and timeout
             const response = await Promise.race([
-                fetch(testUrl, { method: 'GET' }),
+                fetch(testUrl, { 
+                    method: 'GET',
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true'
+                    }
+                }),
                 timeoutPromise
             ]);
             
             if (!response.ok) {
-                throw new Error(`Server not responding (${response.status})`);
+                const errorText = await response.text();
+                console.error('Server response error:', response.status, errorText);
+                throw new Error(`Server not responding (${response.status}): ${errorText.substring(0, 100)}...`);
+            }
+            
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const responseText = await response.text();
+                console.error('Non-JSON response received:', responseText.substring(0, 200));
+                throw new Error(`Server returned HTML instead of JSON. Check if backend is running properly.`);
             }
             
             const healthData = await response.json();
