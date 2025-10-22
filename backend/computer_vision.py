@@ -4,6 +4,7 @@
 import cv2
 import numpy as np
 import logging
+import math
 from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
@@ -583,7 +584,7 @@ class VisionProcessor:
         return False
     
     def draw_overlays(self, frame: np.ndarray, detections: List[Detection], 
-                     safe_path_grid: np.ndarray) -> np.ndarray:
+                     safe_path_grid: np.ndarray) -> Tuple[np.ndarray, dict]:
         """
         Create clean and reasonable visual overlay system for navigation
         - Selective marking of key safe/blocked zones
@@ -596,7 +597,9 @@ class VisionProcessor:
             safe_path_grid: Binary grid with safe path information
             
         Returns:
-            Frame with clean visual overlays for navigation
+            Tuple containing:
+                - Frame with clean visual overlays for navigation
+                - Dictionary with navigation guidance information
         """
         overlay_frame = frame.copy()
         height, width = frame.shape[:2]
@@ -605,28 +608,57 @@ class VisionProcessor:
         cell_height = height // self.grid_rows
         cell_width = width // self.grid_cols
         
-        # 1. DRAW SELECTIVE SAFE/BLOCKED ZONE INDICATORS
-        # Only mark zones that are critical for navigation (not every single cell)
+        # 1. DRAW PATHWAY GRID TILES
+        # Draw tiles for all grid cells to create a clear pathway visualization
         for row in range(self.grid_rows):
             for col in range(self.grid_cols):
+                # Calculate cell coordinates
                 x1 = col * cell_width
                 y1 = row * cell_height
-                center_x = x1 + cell_width // 2
-                center_y = y1 + cell_height // 2
+                x2 = x1 + cell_width
+                y2 = y1 + cell_height
                 
-                # Only draw indicators in key areas (center corridor and edges)
-                is_center_path = (col >= self.grid_cols // 3 and col <= 2 * self.grid_cols // 3)
-                is_edge_area = (row == 0 or row == self.grid_rows - 1 or col == 0 or col == self.grid_cols - 1)
+                # Add small margin to make tiles visually separated
+                margin = 2
+                x1 += margin
+                y1 += margin
+                x2 -= margin
+                y2 -= margin
                 
-                if is_center_path or is_edge_area:
-                    if safe_path_grid[row, col] == 1:  # Safe zone
-                        # Small green indicators for safe movement areas
-                        cv2.circle(overlay_frame, (center_x, center_y), 8, (0, 255, 0), -1)
-                        cv2.circle(overlay_frame, (center_x, center_y), 10, (0, 200, 0), 2)
-                    else:  # Blocked zone  
-                        # Small red indicators for critical blocked areas
-                        cv2.circle(overlay_frame, (center_x, center_y), 8, (0, 0, 255), -1)
-                        cv2.circle(overlay_frame, (center_x, center_y), 10, (0, 0, 200), 2)
+                # Determine if this is part of the main walkway (center columns)
+                is_main_path = (col >= self.grid_cols // 3 and col <= 2 * self.grid_cols // 3)
+                
+                if safe_path_grid[row, col] == 1:  # Safe zone
+                    # Use semi-transparent green squares for walkable areas
+                    # Brighter green for main path, softer green for side paths
+                    if is_main_path:
+                        # Main walkway - brighter and more visible
+                        color = (0, 220, 0)  # Bright green
+                        alpha = 0.25  # More visible
+                    else:
+                        # Side paths - softer visualization
+                        color = (0, 180, 0)  # Softer green
+                        alpha = 0.15  # More subtle
+                    
+                    # Draw filled rectangle with semi-transparency
+                    overlay = overlay_frame.copy()
+                    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+                    cv2.addWeighted(overlay, alpha, overlay_frame, 1-alpha, 0, overlay_frame)
+                    
+                    # Add grid lines
+                    cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), color, 1)
+                    
+                else:  # Blocked zone
+                    # Use semi-transparent red squares for non-walkable areas
+                    color = (0, 0, 220)  # Red
+                    
+                    # Only show blocked areas that are important for navigation
+                    # (to avoid cluttering the visualization)
+                    if is_main_path or row >= self.grid_rows // 2:  # Only in main path or bottom half
+                        overlay = overlay_frame.copy()
+                        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+                        cv2.addWeighted(overlay, 0.2, overlay_frame, 0.8, 0, overlay_frame)
+                        cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), color, 1)
         
         # 2. DRAW CLEAN BOUNDING BOXES - Only for significant navigation obstacles
         important_objects = []
@@ -730,19 +762,31 @@ class VisionProcessor:
         cv2.addWeighted(overlay, 0.6, overlay_frame, 0.4, 0, overlay_frame)
         
         # Navigation status with clean text
+        navigation_guidance = {}
+        
         if self.has_clear_path(safe_path_grid):
             status_text = "PATH CLEAR"
             status_color = (0, 255, 0)  # Green
             
-            # Simple navigation arrow (less intrusive)
-            center_x = width // 2
-            arrow_start_y = int(height * 0.9)
-            arrow_end_y = int(height * 0.8)
-            cv2.arrowedLine(overlay_frame, (center_x, arrow_start_y), 
-                          (center_x, arrow_end_y), (0, 255, 0), 4, tipLength=0.2)
+            # Draw a clear walking path from bottom to top and get guidance info
+            navigation_guidance = self._draw_walking_path(overlay_frame, safe_path_grid, cell_width, cell_height)
+            
+            # Add voice guidance message to the frame
+            if navigation_guidance and navigation_guidance.get("navigation_message"):
+                guidance_text = navigation_guidance.get("navigation_message")
+                cv2.putText(overlay_frame, guidance_text, (width // 2 - 150, height - 50),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         else:
             status_text = "OBSTACLES"
             status_color = (0, 0, 255)  # Red
+            
+            # Try to find partial paths or suggest directions
+            navigation_guidance = self._suggest_alternative_paths(overlay_frame, safe_path_grid, cell_width, cell_height)
+            
+            # Add turn around guidance to the frame
+            guidance_text = "Turn around to find a clear path"
+            cv2.putText(overlay_frame, guidance_text, (width // 2 - 150, height - 50),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
         # Draw clean status text
         cv2.putText(overlay_frame, status_text, (15, 35),
@@ -754,7 +798,536 @@ class VisionProcessor:
             cv2.putText(overlay_frame, count_text, (width - 150, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
-        return overlay_frame
+        # Return both the overlay frame and the navigation guidance info
+        return overlay_frame, navigation_guidance
+    
+    def _draw_walking_path(self, frame: np.ndarray, safe_path_grid: np.ndarray, 
+                           cell_width: int, cell_height: int) -> dict:
+        """
+        Draw a 3D-like direction path similar to navigation apps
+        
+        Args:
+            frame: The frame to draw on
+            safe_path_grid: Binary grid with safe path information
+            cell_width: Width of each grid cell
+            cell_height: Height of each grid cell
+            
+        Returns:
+            dict: Navigation guidance information including direction and step instructions
+        """
+        height, width = frame.shape[:2]
+        
+        # Find the best path through the grid using simple pathfinding
+        path_points = self._find_navigation_path(safe_path_grid)
+        
+        # Navigation guidance information
+        guidance_info = {
+            "path_found": False,
+            "direction": None,
+            "next_step": None,
+            "distance": 0,
+            "navigation_message": "Turn around to find a clear path"
+        }
+        
+        if not path_points:
+            return guidance_info  # No path found
+        
+        # Convert grid cells to pixel coordinates (center of cells)
+        pixel_path = []
+        for row, col in path_points:
+            x = int(col * cell_width + cell_width / 2)
+            y = int(row * cell_height + cell_height / 2)
+            pixel_path.append((x, y))
+        
+        if len(pixel_path) < 2:
+            return guidance_info  # Need at least 2 points to draw a path
+        
+        # Create perspective effect - make path wider at bottom, narrower at top
+        # This creates a 3D-like effect similar to navigation apps
+        path_segments = []
+        path_width_bottom = int(cell_width * 0.7)  # Wider at bottom
+        path_width_top = int(cell_width * 0.4)     # Narrower at top
+        
+        # Calculate total path length for gradient effect
+        total_path_length = len(pixel_path) - 1
+        
+        # Draw 3D-like navigation path
+        for i in range(len(pixel_path) - 1):
+            p1 = pixel_path[i]
+            p2 = pixel_path[i + 1]
+            
+            # Calculate direction vector
+            dx = p2[0] - p1[0]
+            dy = p2[1] - p1[1]
+            
+            # Normalize direction vector
+            length = max(1, math.sqrt(dx*dx + dy*dy))
+            dx, dy = dx/length, dy/length
+            
+            # Perpendicular vector for width
+            perp_x, perp_y = -dy, dx
+            
+            # Calculate width for this segment based on position in path (perspective effect)
+            # Segments closer to the bottom (higher row value) are wider
+            progress = i / total_path_length
+            segment_width = int(path_width_bottom * (1 - progress) + path_width_top * progress)
+            
+            # Calculate the four corners of the path segment (trapezoid)
+            # For current point
+            p1_left = (int(p1[0] + perp_x * segment_width), int(p1[1] + perp_y * segment_width))
+            p1_right = (int(p1[0] - perp_x * segment_width), int(p1[1] - perp_y * segment_width))
+            
+            # Width for next segment
+            next_progress = (i + 1) / total_path_length
+            next_segment_width = int(path_width_bottom * (1 - next_progress) + path_width_top * next_progress)
+            
+            # For next point
+            p2_left = (int(p2[0] + perp_x * next_segment_width), int(p2[1] + perp_y * next_segment_width))
+            p2_right = (int(p2[0] - perp_x * next_segment_width), int(p2[1] - perp_y * next_segment_width))
+            
+            # Create a polygon for this segment
+            path_segment = np.array([p1_left, p2_left, p2_right, p1_right], np.int32)
+            path_segments.append(path_segment)
+            
+            # Draw filled segment with gradient color (green to blue-green)
+            # Base color is green (0, 255, 0), transitions to teal (0, 255, 128) at the top
+            g_val = 255
+            b_val = int(128 * progress)  # Blue component increases with progress
+            color = (0, g_val, b_val)
+            
+            # Draw filled polygon with semi-transparency
+            overlay = frame.copy()
+            cv2.fillPoly(overlay, [path_segment], color)
+            
+            # Add outer glow/edge effect
+            cv2.polylines(overlay, [path_segment], True, (0, 255, 255), 2)
+            
+            # Apply segment with transparency
+            alpha = 0.7 - (0.3 * progress)  # More transparent further away
+            cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+        
+        # Add direction arrows on the path
+        self._add_direction_arrows(frame, pixel_path)
+        
+        # Add start and destination markers
+        if len(pixel_path) > 1:
+            # Start point (current position)
+            start_x, start_y = pixel_path[0]
+            cv2.circle(frame, (start_x, start_y), int(path_width_bottom * 0.8), (0, 255, 64), -1)
+            cv2.circle(frame, (start_x, start_y), int(path_width_bottom * 0.8), (255, 255, 255), 2)
+            
+            # Destination marker
+            dest_x, dest_y = pixel_path[-1]
+            
+            # Draw a pin-like destination marker
+            pin_height = int(cell_height * 0.8)
+            pin_width = int(cell_width * 0.5)
+            
+            # Pin top (circle)
+            cv2.circle(frame, (dest_x, dest_y - pin_height//2), pin_width, (0, 128, 255), -1)
+            cv2.circle(frame, (dest_x, dest_y - pin_height//2), pin_width, (255, 255, 255), 2)
+            
+            # Pin stem (triangle)
+            pin_bottom = np.array([
+                [dest_x - pin_width//2, dest_y - pin_height//2],
+                [dest_x + pin_width//2, dest_y - pin_height//2],
+                [dest_x, dest_y + pin_height//2]
+            ], np.int32)
+            cv2.fillPoly(frame, [pin_bottom], (0, 128, 255))
+            cv2.polylines(frame, [pin_bottom], True, (255, 255, 255), 2)
+            
+            # Calculate direction for voice guidance
+            if len(path_points) >= 2:
+                # Get first two points to determine initial direction
+                x1, y1 = path_points[0]
+                x2, y2 = path_points[1]
+                
+                # Calculate angle
+                angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
+                
+                # Determine direction
+                direction = None
+                if -45 <= angle < 45:
+                    direction = "right"
+                elif 45 <= angle < 135:
+                    direction = "forward"
+                elif angle >= 135 or angle < -135:
+                    direction = "left"
+                elif -135 <= angle < -45:
+                    direction = "backward"
+                
+                # Determine distance (rough estimate)
+                distance = len(path_points)
+                
+                # Create guidance message
+                if direction == "forward":
+                    navigation_message = "Clear path ahead. Move forward one step."
+                elif direction:
+                    navigation_message = f"Turn slightly {direction} and move one step."
+                else:
+                    navigation_message = "Move forward carefully."
+                
+                # Update guidance info
+                guidance_info = {
+                    "path_found": True,
+                    "direction": direction,
+                    "next_step": "move_forward",
+                    "distance": distance,
+                    "navigation_message": navigation_message
+                }
+                
+                return guidance_info
+        
+        return guidance_info
+    
+    def _add_direction_arrows(self, frame: np.ndarray, path_points: List[Tuple[int, int]]) -> None:
+        """
+        Add direction arrows to the path
+        
+        Args:
+            frame: The frame to draw on
+            path_points: List of path points in pixel coordinates
+        """
+        if len(path_points) < 5:
+            return  # Need enough points for meaningful arrows
+        
+        # Add arrows at intervals along the path
+        interval = max(1, len(path_points) // 4)  # Show about 3-4 arrows on the path
+        
+        for i in range(interval, len(path_points) - interval, interval):
+            # Get points before and after for direction
+            p_before = path_points[i - interval]
+            p_current = path_points[i]
+            
+            # Calculate direction vector
+            dx = p_current[0] - p_before[0]
+            dy = p_current[1] - p_before[1]
+            
+            # Skip if movement is too small
+            if abs(dx) < 5 and abs(dy) < 5:
+                continue
+                
+            # Calculate arrow size based on path position (bigger at bottom)
+            progress = i / len(path_points)
+            arrow_size = int(15 * (1 - progress) + 8 * progress)
+            
+            # Draw a nice arrow with 3D effect
+            # Main arrow
+            cv2.arrowedLine(frame, p_before, p_current, (0, 255, 255), arrow_size, tipLength=0.3)
+            
+            # Inner arrow (for 3D effect)
+            cv2.arrowedLine(frame, p_before, p_current, (0, 200, 128), arrow_size//2, tipLength=0.3)
+    
+    def _find_navigation_path(self, safe_path_grid: np.ndarray) -> List[Tuple[int, int]]:
+        """
+        Find a natural-looking path through the safe grid cells
+        
+        Args:
+            safe_path_grid: Binary grid with safe path information
+            
+        Returns:
+            List of (row, col) coordinates forming a path
+        """
+        rows, cols = safe_path_grid.shape
+        
+        # Start from bottom center
+        start_row = rows - 1
+        start_col = cols // 2
+        
+        # Try to find a suitable start point if center is blocked
+        if safe_path_grid[start_row, start_col] == 0:
+            for offset in range(1, cols//2):
+                if start_col - offset >= 0 and safe_path_grid[start_row, start_col - offset] == 1:
+                    start_col = start_col - offset
+                    break
+                elif start_col + offset < cols and safe_path_grid[start_row, start_col + offset] == 1:
+                    start_col = start_col + offset
+                    break
+        
+        # If still no valid start, return empty path
+        if safe_path_grid[start_row, start_col] == 0:
+            return []
+        
+        # Find destination (somewhere in the top half of the grid)
+        dest_row = rows // 4  # Aim for top quarter
+        dest_col = cols // 2   # Center of grid
+        
+        # Try to find a suitable destination
+        if safe_path_grid[dest_row, dest_col] == 0:
+            best_dest = None
+            # Search top half for safe cells
+            for r in range(0, rows//2):
+                for c in range(cols):
+                    if safe_path_grid[r, c] == 1:
+                        if best_dest is None or r < best_dest[0]:
+                            best_dest = (r, c)
+            
+            if best_dest:
+                dest_row, dest_col = best_dest
+            else:
+                # No suitable destination found
+                return [(start_row, start_col)]  # Just return starting point
+        
+        # Simple A* pathfinding
+        import heapq
+        
+        # Initialize data structures for A*
+        open_set = [(0, start_row, start_col)]  # Priority queue (f_score, row, col)
+        came_from = {}  # To reconstruct the path
+        g_score = {(start_row, start_col): 0}  # Cost from start
+        f_score = {(start_row, start_col): abs(start_row - dest_row) + abs(start_col - dest_col)}  # Estimated cost to goal
+        
+        while open_set:
+            _, current_row, current_col = heapq.heappop(open_set)
+            
+            # Check if we reached destination
+            if current_row == dest_row and current_col == dest_col:
+                # Reconstruct path
+                path = [(current_row, current_col)]
+                while (current_row, current_col) in came_from:
+                    current_row, current_col = came_from[(current_row, current_col)]
+                    path.append((current_row, current_col))
+                path.reverse()  # Start to destination
+                return path
+            
+            # Check neighbors (4-directional movement)
+            for dr, dc in [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
+                neighbor_row, neighbor_col = current_row + dr, current_col + dc
+                
+                # Check if valid and safe
+                if (0 <= neighbor_row < rows and 0 <= neighbor_col < cols and 
+                    safe_path_grid[neighbor_row, neighbor_col] == 1):
+                    
+                    # Calculate cost (diagonal movement costs more)
+                    move_cost = 1.4 if abs(dr) + abs(dc) > 1 else 1.0
+                    tentative_g = g_score[(current_row, current_col)] + move_cost
+                    
+                    if ((neighbor_row, neighbor_col) not in g_score or 
+                        tentative_g < g_score[(neighbor_row, neighbor_col)]):
+                        
+                        # This path is better
+                        came_from[(neighbor_row, neighbor_col)] = (current_row, current_col)
+                        g_score[(neighbor_row, neighbor_col)] = tentative_g
+                        f_score[(neighbor_row, neighbor_col)] = tentative_g + abs(neighbor_row - dest_row) + abs(neighbor_col - dest_col)
+                        
+                        # Add to open set if not already there
+                        heapq.heappush(open_set, (f_score[(neighbor_row, neighbor_col)], neighbor_row, neighbor_col))
+        
+        # No path found, return empty list
+        return []
+    
+    def _suggest_alternative_paths(self, frame: np.ndarray, safe_path_grid: np.ndarray, 
+                                 cell_width: int, cell_height: int) -> dict:
+        """
+        Suggest alternative partial paths when the main path is blocked
+        
+        Args:
+            frame: The frame to draw on
+            safe_path_grid: Binary grid with safe path information
+            cell_width: Width of each grid cell
+            cell_height: Height of each grid cell
+            
+        Returns:
+            dict: Navigation guidance information
+        """
+        # Default guidance information
+        guidance_info = {
+            "path_found": False,
+            "direction": None,
+            "next_step": None,
+            "distance": 0,
+            "navigation_message": "Turn around to find a clear path"
+        }
+        height, width = frame.shape[:2]
+        rows, cols = safe_path_grid.shape
+        
+        # Find connected safe regions
+        from scipy.ndimage import label
+        labeled_grid, num_features = label(safe_path_grid)
+        
+        if num_features == 0:
+            return  # No safe areas
+        
+        # Find the largest connected region
+        region_sizes = {}
+        for i in range(1, num_features + 1):
+            region_sizes[i] = np.sum(labeled_grid == i)
+        
+        # Sort regions by size
+        sorted_regions = sorted(region_sizes.items(), key=lambda x: x[1], reverse=True)
+        
+        # Try to find paths in the largest regions
+        for region_id, _ in sorted_regions[:2]:  # Try the two largest regions
+            # Create mask for this region
+            region_mask = (labeled_grid == region_id).astype(np.uint8)
+            
+            # Find a path within this region
+            partial_path = []
+            
+            # Find bottom-most point in region
+            bottom_points = []
+            for c in range(cols):
+                for r in range(rows-1, -1, -1):
+                    if region_mask[r, c] == 1:
+                        bottom_points.append((r, c))
+                        break
+            
+            if not bottom_points:
+                continue
+                
+            # Sort by row (highest row first - closest to bottom)
+            bottom_points.sort(reverse=True)
+            
+            # Start from the bottom center point
+            center_idx = min(range(len(bottom_points)), key=lambda i: abs(bottom_points[i][1] - cols//2))
+            start_point = bottom_points[center_idx]
+            
+            # Find top-most point in region
+            top_points = []
+            for c in range(cols):
+                for r in range(rows):
+                    if region_mask[r, c] == 1:
+                        top_points.append((r, c))
+                        break
+            
+            if not top_points:
+                continue
+                
+            # Sort by row (lowest row first - closest to top)
+            top_points.sort()
+            
+            # Get the top center point
+            center_idx = min(range(len(top_points)), key=lambda i: abs(top_points[i][1] - cols//2))
+            end_point = top_points[center_idx]
+            
+            # Simple pathfinding within the region
+            import numpy as np
+            temp_grid = np.copy(region_mask)
+            
+            # Find path using BFS
+            from collections import deque
+            queue = deque([(start_point[0], start_point[1])])
+            visited = {(start_point[0], start_point[1]): None}  # (row, col): parent
+            
+            found_path = False
+            while queue and not found_path:
+                current_row, current_col = queue.popleft()
+                
+                if (current_row, current_col) == end_point:
+                    found_path = True
+                    break
+                
+                # Check neighbors
+                for dr, dc in [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
+                    neighbor_row, neighbor_col = current_row + dr, current_col + dc
+                    
+                    if (0 <= neighbor_row < rows and 0 <= neighbor_col < cols and 
+                        temp_grid[neighbor_row, neighbor_col] == 1 and 
+                        (neighbor_row, neighbor_col) not in visited):
+                        
+                        queue.append((neighbor_row, neighbor_col))
+                        visited[(neighbor_row, neighbor_col)] = (current_row, current_col)
+            
+            # Reconstruct path if found
+            if found_path:
+                partial_path = []
+                current = end_point
+                while current is not None:
+                    partial_path.append(current)
+                    current = visited[current]
+                partial_path.reverse()
+                
+                # Convert to pixel coordinates
+                pixel_path = []
+                for row, col in partial_path:
+                    x = int(col * cell_width + cell_width / 2)
+                    y = int(row * cell_height + cell_height / 2)
+                    pixel_path.append((x, y))
+                
+                # Draw dashed path with caution color (yellow/orange)
+                if len(pixel_path) >= 2:
+                    for i in range(len(pixel_path) - 1):
+                        # Draw dashed line segments
+                        p1 = pixel_path[i]
+                        p2 = pixel_path[i + 1]
+                        
+                        # Use dashed line for alternative paths
+                        dash_length = 10
+                        dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+                        dist = max(1, math.sqrt(dx*dx + dy*dy))
+                        dx, dy = dx/dist, dy/dist
+                        
+                        # Calculate number of segments
+                        num_segments = int(dist / dash_length)
+                        
+                        for j in range(num_segments):
+                            if j % 2 == 0:  # Draw every other segment
+                                start_x = int(p1[0] + j * dash_length * dx)
+                                start_y = int(p1[1] + j * dash_length * dy)
+                                end_x = int(min(p1[0] + (j+1) * dash_length * dx, p2[0]))
+                                end_y = int(min(p1[1] + (j+1) * dash_length * dy, p2[1]))
+                                
+                                # Draw thick line with glow effect
+                                cv2.line(frame, (start_x, start_y), (end_x, end_y), (0, 200, 255), 6)  # Outer glow
+                                cv2.line(frame, (start_x, start_y), (end_x, end_y), (0, 255, 255), 3)  # Inner line
+                
+                # Add "ALTERNATE ROUTE" indicator at the start
+                if len(pixel_path) > 1:
+                    alt_text = "ALTERNATE ROUTE"
+                    text_x = pixel_path[0][0] + 20
+                    text_y = pixel_path[0][1] - 10
+                    
+                    # Ensure text is within frame
+                    text_x = max(10, min(text_x, width - 150))
+                    text_y = max(30, min(text_y, height - 10))
+                    
+                    # Draw text with background
+                    text_size = cv2.getTextSize(alt_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
+                    cv2.rectangle(frame, 
+                                 (text_x - 5, text_y - text_size[1] - 5),
+                                 (text_x + text_size[0] + 5, text_y + 5),
+                                 (0, 100, 200), -1)
+                    cv2.putText(frame, alt_text, (text_x, text_y), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                
+                # Determine direction for alternative path
+                if len(pixel_path) >= 2:
+                    # Get first two points to determine direction
+                    x1, y1 = pixel_path[0]
+                    x2, y2 = pixel_path[1]
+                    
+                    # Calculate angle
+                    angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
+                    
+                    # Determine direction
+                    direction = None
+                    if -45 <= angle < 45:
+                        direction = "right"
+                    elif 45 <= angle < 135:
+                        direction = "forward"
+                    elif angle >= 135 or angle < -135:
+                        direction = "left"
+                    elif -135 <= angle < -45:
+                        direction = "backward"
+                    
+                    # Create guidance message for alternative path
+                    if direction:
+                        alt_guidance = f"Try turning {direction} to find a path"
+                        guidance_info = {
+                            "path_found": True,
+                            "direction": direction,
+                            "next_step": "turn",
+                            "distance": len(pixel_path),
+                            "navigation_message": alt_guidance
+                        }
+                        
+                        return guidance_info
+                
+                # Return default guidance if no direction could be determined
+                return guidance_info
+        
+        # Return default guidance if no alternative paths were found
+        return guidance_info
     
     def _boxes_overlap(self, bbox1: Tuple[int, int, int, int], bbox2: Tuple[int, int, int, int], 
                       overlap_threshold: float = 0.5) -> bool:
@@ -805,7 +1378,7 @@ class VisionProcessor:
         demo_safe_grid[3:5, 6:8] = 0  # Another blocked area
         
         # Apply the clean visualization
-        result_frame = self.draw_overlays(demo_frame, demo_detections, demo_safe_grid)
+        result_frame, _ = self.draw_overlays(demo_frame, demo_detections, demo_safe_grid)
         
         # Add demo title
         cv2.putText(result_frame, "Clean Navigation Visualization Demo", (10, frame_height - 20),
@@ -836,9 +1409,9 @@ class VisionProcessor:
             # Check if path is clear
             path_clear = self.has_clear_path(safe_path_grid)
             
-            # Draw visual overlays
-            processed_frame = self.draw_overlays(frame, detections, safe_path_grid)
-            
+            # Draw visual overlays and get navigation guidance
+            processed_frame, navigation_guidance = self.draw_overlays(frame, detections, safe_path_grid)
+        
             # Compile results
             results = {
                 "detections": [
@@ -860,6 +1433,7 @@ class VisionProcessor:
                     "safe_cells": int(np.sum(safe_path_grid)),
                     "total_cells": int(safe_path_grid.size)
                 },
+                "navigation_guidance": navigation_guidance,
                 "processed_frame": processed_frame,
                 "timestamp": datetime.now().isoformat()
             }

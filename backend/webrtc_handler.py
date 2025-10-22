@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime
 from typing import Dict, Optional, Any
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 from aiortc.contrib.media import MediaRecorder
@@ -483,6 +484,23 @@ class WebRTCConnectionManager:
                     # User is still moving - send additional stop warnings
                     logger.warning("User still moving in BLOCKED state - escalating warnings")
                     # This could trigger additional safety protocols
+            
+            # Process navigation guidance
+            if "navigation_guidance" in processing_results:
+                navigation_guidance = processing_results["navigation_guidance"]
+                if navigation_guidance and navigation_guidance.get("navigation_message"):
+                    # Send navigation guidance message to client
+                    from websocket_manager import websocket_manager
+                    await websocket_manager.broadcast({
+                        "type": "navigation_guidance",
+                        "message": navigation_guidance.get("navigation_message"),
+                        "path_found": navigation_guidance.get("path_found", False),
+                        "direction": navigation_guidance.get("direction"),
+                        "action": "move_forward" if navigation_guidance.get("next_step") == "move_forward" else "turn",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+                    logger.info(f"Navigation guidance sent: {navigation_guidance.get('navigation_message')}")
             
             # Always process frame for general FSM handling
             await navigation_fsm.process_frame(img, processing_results)

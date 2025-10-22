@@ -42,6 +42,18 @@
                 <span id="audioStatus">Microphone: Off</span>
             </div>
         </div>
+        
+        <!-- Navigation Guidance Display -->
+        <div class="navigation-guidance" id="navigationGuidance">
+            <div class="guidance-title">
+                <span class="guidance-icon">🧭</span>
+                <span>Navigation Guidance</span>
+            </div>
+            <div class="guidance-message" id="guidanceMessage">
+                Start streaming to receive navigation assistance
+            </div>
+            <div class="guidance-pulse" id="guidancePulse"></div>
+        </div>
 
         <!-- Step 1: Connection Management -->
         <div class="connection-section">
@@ -162,11 +174,12 @@
     </div>
     <script src="../config.js"></script>
     <script src="client.js"></script>
+    <script src="fix-navigation.js"></script>
     <script>
         // Auto-configure backend URL on page load
         document.addEventListener('DOMContentLoaded', () => {
             const serverUrlInput = document.getElementById('serverUrl');
-            const backendUrl = window.AI_NAV_CONFIG.getBackendUrl();
+            const backendUrl = window.AI_NAV_CONFIG?.getBackendUrl?.();
             
             if (backendUrl) {
                 serverUrlInput.value = backendUrl;
@@ -174,6 +187,15 @@
             } else {
                 serverUrlInput.placeholder = 'Enter your backend server URL (e.g., http://localhost:8000)';
                 console.log('🔧 No backend URL configured - user must enter manually');
+            }
+            
+            // Add test mode link
+            const debugSection = document.getElementById('debugSection');
+            if (debugSection) {
+                const testModeLink = document.createElement('div');
+                testModeLink.style.marginTop = '10px';
+                testModeLink.innerHTML = '<a href="?test=true" style="color: #4a90e2; text-decoration: underline;">Enable Navigation Test Mode</a>';
+                debugSection.appendChild(testModeLink);
             }
         });
     </script>

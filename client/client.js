@@ -57,6 +57,7 @@ class NavigationClient {
         this.videoStream = null;
         this.audioStream = null;
         this.peerConnection = null;
+        this.dataChannel = null;
         this.websocket = null;
         this.isConnected = false;
         this.cameraEnabled = false;
@@ -66,6 +67,11 @@ class NavigationClient {
         this.clientId = this.generateClientId(); // Generate once and reuse
         this.currentCameraFacing = 'user'; // 'user' for front camera, 'environment' for back camera
         this.availableCameras = []; // Store available camera devices
+        
+        // Navigation guidance properties
+        this.isSpeaking = false;
+        this.lastGuidanceMessage = '';
+        this.lastGuidanceTime = 0;
         
         // Biometric sensor properties (placeholder for optional task 6.3)
         // this.availableSensors = {};
@@ -269,6 +275,59 @@ class NavigationClient {
         
         this.peerConnection = new RTCPeerConnection(configuration);
         
+        // Create data channel for receiving navigation guidance
+        this.dataChannel = this.peerConnection.createDataChannel('navigationGuidance', {
+            ordered: true
+        });
+        
+        // Set up data channel event handlers
+        this.dataChannel.onopen = () => {
+            console.log('✅ Navigation guidance data channel opened');
+            this.updateGuidanceStatus('Connected to navigation service');
+        };
+        
+        this.dataChannel.onclose = () => {
+            console.log('❌ Navigation guidance data channel closed');
+            this.updateGuidanceStatus('Navigation service disconnected');
+        };
+        
+        this.dataChannel.onmessage = (event) => {
+            console.log('📡 Received navigation guidance:', event.data);
+            try {
+                const guidanceData = JSON.parse(event.data);
+                this.handleNavigationGuidance(guidanceData);
+            } catch (error) {
+                console.error('Error parsing navigation guidance:', error);
+            }
+        };
+        
+        // Handle data channel from the server
+        this.peerConnection.ondatachannel = (event) => {
+            const receivedChannel = event.channel;
+            
+            receivedChannel.onopen = () => {
+                console.log('✅ Server-initiated data channel opened:', receivedChannel.label);
+            };
+            
+            receivedChannel.onmessage = (messageEvent) => {
+                console.log(`📡 Message received on ${receivedChannel.label}:`, messageEvent.data);
+                
+                try {
+                    // Handle guidance data
+                    if (receivedChannel.label === 'navigationGuidance' || receivedChannel.label === 'guidance') {
+                        const guidanceData = JSON.parse(messageEvent.data);
+                        this.handleNavigationGuidance(guidanceData);
+                    }
+                } catch (error) {
+                    console.error('Error handling channel message:', error);
+                }
+            };
+            
+            receivedChannel.onclose = () => {
+                console.log('❌ Server-initiated data channel closed:', receivedChannel.label);
+            };
+        };
+        
         // Set up event handlers
         this.peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
@@ -325,6 +384,9 @@ class NavigationClient {
                     this.reconnectAttempts = 0; // Reset on successful connection
                     console.log('✅ WebRTC connection established - now streaming to backend');
                     
+                    // Update navigation guidance UI
+                    this.updateGuidanceStatus('Ready for navigation guidance');
+                    
                     // Log media streaming statistics
                     setTimeout(() => {
                         this.peerConnection.getStats().then(stats => {
@@ -380,6 +442,7 @@ class NavigationClient {
                     document.getElementById('streamIndicator').className = 'status-indicator error';
                     this.updateStreamStatus('Connection lost');
                     this.showError('WebRTC connection lost');
+                    this.updateGuidanceStatus('Navigation service disconnected');
                     this.handleConnectionFailure();
                     break;
                     
@@ -389,6 +452,7 @@ class NavigationClient {
                     this.updateStreamStatus('Connection failed');
                     console.error('WebRTC connection failed - possible causes: firewall, NAT, or network restrictions');
                     this.showError('WebRTC connection failed - check network/firewall settings');
+                    this.updateGuidanceStatus('Navigation service unavailable');
                     this.handleConnectionFailure();
                     break;
                     
@@ -396,6 +460,7 @@ class NavigationClient {
                     document.getElementById('connectionIndicator').className = 'status-indicator inactive';
                     document.getElementById('streamIndicator').className = 'status-indicator inactive';
                     this.updateStreamStatus('Inactive');
+                    this.updateGuidanceStatus('Navigation service disconnected');
                     break;
                     
                 default:
@@ -586,6 +651,98 @@ class NavigationClient {
 
     // WebSocket signaling removed - client now uses HTTP for WebRTC offers
     // This simplifies the connection process and removes WebSocket dependency
+
+    // Navigation guidance handling
+    handleNavigationGuidance(guidanceData) {
+        if (!guidanceData) return;
+        
+        const guidanceMessage = document.getElementById('guidanceMessage');
+        const guidancePulse = document.getElementById('guidancePulse');
+        
+        // Reset previous classes
+        guidanceMessage.className = 'guidance-message';
+        
+        let message = '';
+        let directionClass = '';
+        let icon = '';
+        
+        // Determine guidance message and styling based on direction
+        switch(guidanceData.direction) {
+            case 'forward':
+                message = 'Move Forward';
+                directionClass = 'direction-forward';
+                icon = '⬆️';
+                break;
+            case 'left':
+                message = 'Turn Left';
+                directionClass = 'direction-left';
+                icon = '⬅️';
+                break;
+            case 'right':
+                message = 'Turn Right';
+                directionClass = 'direction-right';
+                icon = '➡️';
+                break;
+            case 'turn_around':
+                message = 'Turn Around';
+                directionClass = 'direction-turn-around';
+                icon = '🔄';
+                break;
+            case 'wait':
+                message = 'Please Wait';
+                directionClass = 'direction-wait';
+                icon = '⏳';
+                break;
+            case 'no_path':
+                message = 'No Path Detected';
+                directionClass = 'direction-no-path';
+                icon = '⚠️';
+                break;
+            default:
+                message = guidanceData.message || 'Processing...';
+        }
+        
+        // Set message with icon
+        guidanceMessage.innerHTML = `${icon} ${message}`;
+        if (guidanceData.distance) {
+            guidanceMessage.innerHTML += ` (${guidanceData.distance}m)`;
+        }
+        
+        // Apply direction-specific styling
+        guidanceMessage.classList.add(directionClass);
+        
+        // Trigger pulse animation for new guidance
+        guidancePulse.classList.remove('active');
+        setTimeout(() => {
+            guidancePulse.classList.add('active');
+        }, 10);
+        
+        // Speak guidance using text-to-speech if available
+        this.speakGuidanceMessage(`${message}${guidanceData.distance ? ', ' + guidanceData.distance + ' meters' : ''}`);
+    }
+    
+    speakGuidanceMessage(message) {
+        // Use speech synthesis if available
+        if (window.speechSynthesis && !this.isSpeaking) {
+            this.isSpeaking = true;
+            const utterance = new SpeechSynthesisUtterance(message);
+            utterance.volume = 1; // 0 to 1
+            utterance.rate = 1; // 0.1 to 10
+            utterance.pitch = 1; //0 to 2
+            utterance.lang = 'en-US';
+            
+            utterance.onend = () => {
+                this.isSpeaking = false;
+            };
+            
+            window.speechSynthesis.speak(utterance);
+            
+            // Safety fallback in case onend doesn't fire
+            setTimeout(() => {
+                this.isSpeaking = false;
+            }, 5000);
+        }
+    }
 
     // Signaling message handling removed - using HTTP for WebRTC negotiation
 
@@ -1476,13 +1633,21 @@ class NavigationClient {
                 this.localStream = null;
             }
             
+            // Close data channel if exists
+            if (this.dataChannel) {
+                this.dataChannel.close();
+                this.dataChannel = null;
+            }
+            
             // Close peer connection if exists
             if (this.peerConnection) {
                 this.peerConnection.close();
                 this.peerConnection = null;
             }
             
+            // Update UI
             this.updateStreamStatus('Inactive');
+            this.updateGuidanceStatus('Start streaming to receive navigation assistance');
             document.getElementById('streamIndicator').className = 'status-indicator';
             document.getElementById('startStreamBtn').disabled = false;
             document.getElementById('stopStreamBtn').disabled = true;
@@ -1621,7 +1786,17 @@ class NavigationClient {
         this.updateConnectionStatus('Disconnected');
         this.updateStreamStatus('Inactive');
         this.updateConnectionState('new');
+        this.updateGuidanceStatus('Start streaming to receive navigation assistance');
         this.updateConnectButtonState();
+    }
+    
+    updateGuidanceStatus(message) {
+        const guidanceMessage = document.getElementById('guidanceMessage');
+        if (guidanceMessage) {
+            // Reset any previous styling
+            guidanceMessage.className = 'guidance-message';
+            guidanceMessage.textContent = message;
+        }
     }
     
     updateConnectButtonState() {
@@ -1914,8 +2089,24 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, initializing NavigationClient...');
     const client = new NavigationClient();
     
+    // Store client instance for testing
+    window.navigatorClientInstances = window.navigatorClientInstances || [];
+    window.navigatorClientInstances.push(client);
+    
     // Force update connect button state after a short delay to ensure DOM is ready
     setTimeout(() => {
         client.updateConnectButtonState();
     }, 100);
+    
+    // Load test script if 'test=true' is in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const testMode = urlParams.get('test') === 'true';
+    
+    if (testMode && !document.getElementById('navTestScript')) {
+        const testScript = document.createElement('script');
+        testScript.id = 'navTestScript';
+        testScript.src = 'test-navigation.js';
+        document.body.appendChild(testScript);
+        console.log('🧪 Navigation test mode enabled - loaded test script');
+    }
 });
