@@ -269,7 +269,17 @@ class NavigationClient {
             });
             
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                const errorText = await response.text();
+                console.error('WebRTC offer failed:', response.status, errorText);
+                throw new Error(`HTTP error! status: ${response.status}, response: ${errorText.substring(0, 100)}...`);
+            }
+            
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const responseText = await response.text();
+                console.error('WebRTC non-JSON response:', responseText.substring(0, 200));
+                throw new Error(`WebRTC endpoint returned HTML instead of JSON. Backend may be busy or misconfigured.`);
             }
             
             const answerData = await response.json();
@@ -824,26 +834,20 @@ class NavigationClient {
             document.getElementById('startStreamBtn').disabled = true;
             document.getElementById('stopStreamBtn').disabled = false;
             
-            // Now automatically connect to backend if not already connected
+            // Now check backend connection (don't auto-connect, just check status)
             if (!this.isConnected) {
-                console.log('Local stream ready - connecting to backend...');
-                this.updateStreamStatus('Connecting to backend...');
-                
-                try {
-                    await this.connectToServer();
-                    console.log('Successfully connected to backend');
-                } catch (error) {
-                    console.warn('Failed to connect to backend:', error.message);
-                    this.showError('Backend connection failed - streaming locally only: ' + error.message);
-                    this.updateStreamStatus('Local only (backend unavailable)');
-                    // Continue with local streaming even if backend connection fails
-                    return;
-                }
+                console.log('Local stream ready - backend not connected yet');
+                this.updateStreamStatus('Local only (backend disconnected)');
+                this.showError('Connect to backend first using the "Manual Connect" button before streaming to server');
+                return;
             }
             
-            // Backend connection successful - set up WebRTC
-            console.log('Setting up WebRTC connection...');
+            // Backend already connected - set up WebRTC streaming
+            console.log('Backend connected - setting up WebRTC streaming...');
             this.updateStreamStatus('Setting up WebRTC...');
+            
+            // Add a small delay to ensure backend is ready for WebRTC
+            await new Promise(resolve => setTimeout(resolve, 1000));
             
             // Create WebRTC peer connection if not exists
             if (!this.peerConnection) {
@@ -914,9 +918,12 @@ class NavigationClient {
             const testUrl = serverUrl.replace(/\/$/, '') + '/health';
             console.log('Testing server connectivity at:', testUrl);
             
+            // Add a small delay to avoid conflicts with any ongoing requests
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
             // Create a timeout promise
             const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Connection timeout')), 5000);
+                setTimeout(() => reject(new Error('Connection timeout')), 10000);
             });
             
             // Race between fetch and timeout

@@ -36,7 +36,7 @@ jobs:
     - name: Verify Python project structure
       run: |
         echo "🤖 AI Navigation Assistant - Production Deployment"
-        echo "Backend: AWS service (18.222.141.234:8000)"
+        echo "Backend: ngrok service (https://flagless-clinographic-janita.ngrok-free.dev)"
         echo "Frontend: GitHub Pages"
         echo "Client: GitHub Pages"
         
@@ -98,34 +98,17 @@ jobs:
         
     - name: Update client configuration for GitHub Pages
       run: |
-        # Update client to connect to AWS backend
-        sed -i 's/http:\/\/localhost:8000/http:\/\/18.222.141.234:8000/g' dist/client/client.js
+        # Update client to connect to ngrok backend
+        sed -i 's/http:\/\/localhost:8000/https:\/\/flagless-clinographic-janita.ngrok-free.dev/g' dist/client/client.js
         
-        # Add CORS handling note to client
-        cat >> dist/client/index.html << 'EOF'
-        
-        <!-- GitHub Pages Deployment Notice -->
-        <div style="position: fixed; top: 10px; right: 10px; background: rgba(255,193,7,0.9); color: black; padding: 10px; border-radius: 5px; font-size: 12px; max-width: 300px;">
-            <strong>GitHub Pages Deployment</strong><br>
-            Backend running on AWS (18.222.141.234:8000).<br>
-            Enable CORS in your browser if needed.
-        </div>
-        EOF
+        # Client files are ready for deployment
         
     - name: Update frontend configuration for GitHub Pages  
       run: |
-        # Update frontend to connect to AWS backend
-        sed -i 's/localhost:8000/18.222.141.234:8000/g' dist/app.js
+        # Update frontend to connect to ngrok backend
+        sed -i 's/localhost:8000/flagless-clinographic-janita.ngrok-free.dev/g' dist/app.js
         
-        # Add deployment notice to frontend
-        cat >> dist/frontend.html << 'EOF'
-        
-        <!-- GitHub Pages Deployment Notice -->
-        <div style="position: fixed; top: 10px; right: 10px; background: rgba(76,175,80,0.9); color: white; padding: 10px; border-radius: 5px; font-size: 12px; max-width: 300px; z-index: 9999;">
-            <strong>Live Deployment</strong><br>
-            Backend running on AWS (18.222.141.234:8000)
-        </div>
-        EOF
+        # Frontend files are ready for deployment
         
     - name: Setup Pages
       if: github.ref == 'refs/heads/main'
@@ -152,6 +135,6 @@ jobs:
         echo "- **Client Device:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/client/" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🔧 Setup Complete:" >> $GITHUB_STEP_SUMMARY
-        echo "1. Backend is running on AWS: \`http://18.222.141.234:8000\`" >> $GITHUB_STEP_SUMMARY
+        echo "1. Backend is running on ngrok: \`https://flagless-clinographic-janita.ngrok-free.dev\`" >> $GITHUB_STEP_SUMMARY
         echo "2. Open the live URLs above in your browser" >> $GITHUB_STEP_SUMMARY
-        echo "3. Frontend and client automatically connect to AWS backend" >> $GITHUB_STEP_SUMMARY
+        echo "3. Frontend and client automatically connect to ngrok backend" >> $GITHUB_STEP_SUMMARY
