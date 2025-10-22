@@ -1,4 +1,4 @@
-name: Deploy AI Navigation Assistant
+name: Deploy AI Navigation Assistant (Python)
 
 on:
   push:
@@ -14,10 +14,19 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
+    - name: Setup Python
+      uses: actions/setup-python@v4
       with:
-        node-version: '18'
+        python-version: '3.9'
+        
+    - name: Verify Python project structure
+      run: |
+        echo "🐍 Python AI Navigation Assistant Project"
+        echo "Backend requirements:"
+        cat backend/requirements.txt
+        echo ""
+        echo "Project structure:"
+        find . -name "*.py" | head -10
         
     - name: Create deployment structure
       run: |

@@ -7,7 +7,12 @@
     "serve": "python -m http.server 3001",
     "dev": "python -m http.server 3001"
   },
-  "keywords": ["navigation", "client", "webrtc", "camera"],
+  "keywords": [
+    "navigation",
+    "client",
+    "webrtc",
+    "camera"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {},

@@ -1,0 +1,24 @@
+# AI Navigation Assistant - Python Project
+# Ensure GitHub properly detects this as a Python project
+
+*.py linguist-language=Python
+*.html linguist-language=HTML
+*.css linguist-language=CSS
+*.js linguist-language=JavaScript
+
+# Backend Python files (main project)
+backend/*.py linguist-language=Python
+
+# Configuration files
+*.toml linguist-language=TOML
+*.yml linguist-language=YAML
+*.yaml linguist-language=YAML
+requirements.txt linguist-language=Text
+
+# Mark frontend/client as supporting files, not main language
+frontend/* linguist-vendored=false
+client/* linguist-vendored=false
+
+# Ensure Python is detected as primary language
+*.py linguist-detectable=true
+backend/ linguist-language=Python
